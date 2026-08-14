@@ -1,0 +1,8 @@
+{
+  "android_common_commit": "d09ef2e980e0974a0d6dfe762e29fff118db7f46",
+  "kernelsu_next_commit": "26fded805206ae4542f4745e09cc465412994492",
+  "susfs_version": "v2.2.0",
+  "official_susfs_patch_sha256": "9f6c646a537a00d5571a8bb98698d49aca39a6d4a76d5dea322057cb79029966",
+  "boot_asset_tag": "stock-boot",
+  "boot_asset_format": "boot.img.zip containing boot.img"
+}
