@@ -140,7 +140,7 @@ jobs:
 
 
       # =========================================================
-      # 7. التحقق من أن KernelSU-Next يحتوي SUSFS
+      # 7. التحقق من أن KernelSU-Next يحتوي SUSFS مسبقًا
       # =========================================================
       - name: التحقق من تكامل SUSFS داخل KernelSU-Next
         run: |
@@ -215,7 +215,7 @@ jobs:
 
 
       # =========================================================
-      # 11. نسخ إعداد النواة الأصلي
+      # 11. نسخ إعداد النواة الأصلي إلى مجلد الإخراج
       # =========================================================
       - name: تجهيز Kernel Config
         run: |
@@ -230,57 +230,56 @@ jobs:
 
       # =========================================================
       # 12. تفعيل KernelSU و SUSFS
+      #
+      # التعديل الوحيد هنا:
+      # إضافة CONFIG_THREAD_INFO_IN_TASK قبل olddefconfig.
       # =========================================================
       - name: تفعيل KernelSU و SUSFS
         run: |
-          set -e
 
-          C="$GITHUB_WORKSPACE/kernel/scripts/config"
-          CFG="$GITHUB_WORKSPACE/out/.config"
-
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_THREAD_INFO_IN_TASK
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_PATH
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_MOUNT
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_KSTAT
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_MAP
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --disable CONFIG_TRIM_UNUSED_KSYMS \
             || true
 
-          "$C" \
-            --file "$CFG" \
+          kernel/scripts/config \
+            --file out/.config \
             --disable CONFIG_UNUSED_KSYMS \
             || true
 
@@ -290,10 +289,8 @@ jobs:
       # =========================================================
       # 13. إنشاء الإعداد النهائي
       # =========================================================
-      - name: إنشاء إعداد البناء النهائي
+      - name: إنشاء الإعداد النهائي
         run: |
-          set -e
-
           make \
             -C kernel \
             O="$GITHUB_WORKSPACE/out" \
@@ -306,84 +303,121 @@ jobs:
 
 
       # =========================================================
-      # 14. التحقق من Config بعد olddefconfig
+      # 14. إعادة تثبيت SUSFS بعد olddefconfig
+      #
+      # هذا هو الإصلاح المطلوب لمشكلة undef.
+      # لا نعيد olddefconfig بعد هذه الخطوة.
       # =========================================================
-      - name: التحقق الصارم من Config SUSFS
+      - name: إعادة تثبيت SUSFS بعد Kconfig
         run: |
           set -e
 
-          CFG="$GITHUB_WORKSPACE/out/.config"
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_THREAD_INFO_IN_TASK
 
-          echo "=============================="
-          echo "CONFIGURATION CHECK"
-          echo "=============================="
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU
 
-          check_config() {
-            NAME="$1"
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS
 
-            LINE="$(grep -E "^${NAME}=" "$CFG" || true)"
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH
 
-            echo "$NAME -> ${LINE:-UNDEF}"
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
 
-            if [ "$LINE" != "${NAME}=y" ]; then
-              echo ""
-              echo "ERROR: $NAME ليس =y"
-              echo ""
-              echo "KernelSU / SUSFS configuration:"
-              grep -E \
-                "^(CONFIG_THREAD_INFO_IN_TASK|CONFIG_KSU|CONFIG_KSU_SUSFS)" \
-                "$CFG" \
-                || true
-              exit 1
-            fi
-          }
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
 
-          check_config CONFIG_THREAD_INFO_IN_TASK
-          check_config CONFIG_KSU
-          check_config CONFIG_KSU_SUSFS
-          check_config CONFIG_KSU_SUSFS_SUS_PATH
-          check_config CONFIG_KSU_SUSFS_SUS_MOUNT
-          check_config CONFIG_KSU_SUSFS_SUS_KSTAT
-          check_config CONFIG_KSU_SUSFS_SUS_MAP
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT
 
-          echo ""
-          echo "=============================="
-          echo "SUSFS CONFIG OK"
-          echo "=============================="
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_MAP
+
+          echo "تم تثبيت إعدادات SUSFS النهائية."
 
 
       # =========================================================
-      # 15. عرض الإعداد النهائي
+      # 15. فحص KSU و SUSFS
+      #
+      # لا نستخدم scripts/config --state هنا.
+      # نفحص .config مباشرة.
       # =========================================================
-      - name: فحص إعدادات KSU و SUSFS
+      - name: التحقق من Config SUSFS النهائي
         run: |
+          set -e
+
           echo "=============================="
           echo "KernelSU"
           echo "=============================="
 
-          grep '^CONFIG_KSU=' \
-            out/.config || true
+          grep -qx \
+            'CONFIG_KSU=y' \
+            out/.config
+
+          echo "CONFIG_KSU=y"
 
           echo "=============================="
           echo "THREAD INFO"
           echo "=============================="
 
-          grep '^CONFIG_THREAD_INFO_IN_TASK=' \
-            out/.config || true
+          grep -qx \
+            'CONFIG_THREAD_INFO_IN_TASK=y' \
+            out/.config
+
+          echo "CONFIG_THREAD_INFO_IN_TASK=y"
 
           echo "=============================="
           echo "SUSFS"
           echo "=============================="
 
-          grep '^CONFIG_KSU_SUSFS=' \
-            out/.config || true
+          grep -qx \
+            'CONFIG_KSU_SUSFS=y' \
+            out/.config
+
+          echo "CONFIG_KSU_SUSFS=y"
+
+          grep -qx \
+            'CONFIG_KSU_SUSFS_SUS_PATH=y' \
+            out/.config
+
+          grep -qx \
+            'CONFIG_KSU_SUSFS_SUS_MOUNT=y' \
+            out/.config
+
+          grep -qx \
+            'CONFIG_KSU_SUSFS_SUS_KSTAT=y' \
+            out/.config
+
+          grep -qx \
+            'CONFIG_KSU_SUSFS_SUS_MAP=y' \
+            out/.config
+
+          echo "خصائص SUSFS الأساسية = y"
 
           echo "=============================="
           echo "SUSFS OPTIONS"
           echo "=============================="
 
           grep '^CONFIG_KSU_SUSFS_' \
-            out/.config || true
+            out/.config \
+            || true
+
+          echo "تم التحقق من Config SUSFS النهائي."
 
 
       # =========================================================
@@ -429,10 +463,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-build-log
+          name: kernel-build-log-${{ github.run_number }}
           path: kernel-build.log
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
 
 
       # =========================================================
@@ -622,7 +656,7 @@ print(apk[0])
 
 
       # =========================================================
-      # 24. استبدال Kernel
+      # 24. استبدال Kernel الأصلي
       # =========================================================
       - name: استبدال Kernel الأصلي
         run: |
@@ -704,7 +738,7 @@ print(apk[0])
       - name: رفع ملفات البناء النهائية
         uses: actions/upload-artifact@v4
         with:
-          name: BG7n-SUSFS-KSU-build
+          name: BG7n-SUSFS-KSU-build-${{ github.run_number }}
 
           path: |
             boot-BG7n-SUSFS-KSU.img
@@ -712,6 +746,23 @@ print(apk[0])
             out/.config
             susfs-module-source.tar.gz
             patches-susfs-bg7n.patch
+
+          if-no-files-found: error
+
+          retention-days: 14
+
+
+      # =========================================================
+      # 29. حفظ boot.img منفصلًا
+      # =========================================================
+      - name: حفظ boot.img النهائي
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-BG7n-SUSFS-KSU-${{ github.run_number }}
+
+          path: |
+            boot-BG7n-SUSFS-KSU.img
 
           if-no-files-found: error
 
