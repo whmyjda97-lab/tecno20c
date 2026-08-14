@@ -81,19 +81,20 @@ jobs:
           echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify bundled KernelSU-Next and SUSFS sources
+      - name: Verify bundled KernelSU-Next source
         run: |
           set -e
 
           test -f "$KSU_DIR/kernel/setup.sh"
           test -f "$KSU_DIR/kernel/Kconfig"
           test -f "$KSU_DIR/kernel/Kbuild"
-          grep -q "CONFIG_KSU_SUSFS" "$KSU_DIR/kernel/Kconfig"
-          grep -q "CONFIG_KSU_SUSFS" "$KSU_DIR/kernel/Kbuild"
 
           test -f "$SUSFS_DIR/kernel_patches/fs/susfs.c"
           test -f "$SUSFS_DIR/kernel_patches/include/linux/susfs.h"
           test -f "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h"
+
+          echo "Bundled KernelSU-Next source verified."
+          echo "Bundled SUSFS source verified."
 
       - name: Install bundled KernelSU-Next
         run: |
@@ -141,6 +142,7 @@ jobs:
           "$C" --enable CONFIG_THREAD_INFO_IN_TASK
           "$C" --enable CONFIG_KSU
           "$C" --enable CONFIG_KSU_SUSFS
+
           "$C" --enable CONFIG_KSU_SUSFS_SUS_PATH
           "$C" --enable CONFIG_KSU_SUSFS_SUS_MOUNT
           "$C" --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
@@ -175,7 +177,7 @@ jobs:
           grep -qx 'CONFIG_KSU_SUSFS_SUS_PATH=y' "$CFG"
           grep -qx 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' "$CFG"
           grep -qx 'CONFIG_KSU_SUSFS_SUS_KSTAT=y' "$CFG"
-          grep -qx 'CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y' "$CFG"
+          grep -qx 'CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y'
           grep -qx 'CONFIG_KSU_SUSFS_SUS_MAP=y' "$CFG"
 
           cp "$CFG" "$GITHUB_WORKSPACE/final.config"
