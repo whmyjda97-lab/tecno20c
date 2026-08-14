@@ -140,7 +140,7 @@ jobs:
 
 
       # =========================================================
-      # 7. التحقق من تكامل SUSFS داخل KernelSU-Next
+      # 7. التحقق من أن KernelSU-Next يحتوي SUSFS
       # =========================================================
       - name: التحقق من تكامل SUSFS داخل KernelSU-Next
         run: |
@@ -215,7 +215,7 @@ jobs:
 
 
       # =========================================================
-      # 11. نسخ إعداد النواة الأصلي إلى مجلد الإخراج
+      # 11. نسخ إعداد النواة الأصلي
       # =========================================================
       - name: تجهيز Kernel Config
         run: |
@@ -230,17 +230,13 @@ jobs:
 
       # =========================================================
       # 12. تفعيل KernelSU و SUSFS
-      #
-      # المهم هنا:
-      # CONFIG_KSU_SUSFS يعتمد على CONFIG_THREAD_INFO_IN_TASK
-      # لذلك يجب تفعيله قبل olddefconfig.
       # =========================================================
       - name: تفعيل KernelSU و SUSFS
         run: |
           set -e
 
-          C=kernel/scripts/config
-          CFG=out/.config
+          C="$GITHUB_WORKSPACE/kernel/scripts/config"
+          CFG="$GITHUB_WORKSPACE/out/.config"
 
           "$C" \
             --file "$CFG" \
@@ -279,13 +275,13 @@ jobs:
             --enable CONFIG_KSU_SUSFS_SUS_MAP
 
           "$C" \
-            --disable CONFIG_TRIM_UNUSED_KSYMS \
             --file "$CFG" \
+            --disable CONFIG_TRIM_UNUSED_KSYMS \
             || true
 
           "$C" \
-            --disable CONFIG_UNUSED_KSYMS \
             --file "$CFG" \
+            --disable CONFIG_UNUSED_KSYMS \
             || true
 
           echo "تم تفعيل خيارات KernelSU و SUSFS."
@@ -310,54 +306,45 @@ jobs:
 
 
       # =========================================================
-      # 14. فحص Config النهائي قبل البناء
-      #
-      # هذا الفحص هو الإصلاح الأساسي للمشكلة.
-      # إذا ظهر undef هنا سيتوقف البناء فورًا بدل انتظار 20 دقيقة.
+      # 14. التحقق من Config بعد olddefconfig
       # =========================================================
       - name: التحقق الصارم من Config SUSFS
         run: |
           set -e
 
-          C=kernel/scripts/config
-          CFG=out/.config
+          CFG="$GITHUB_WORKSPACE/out/.config"
 
           echo "=============================="
           echo "CONFIGURATION CHECK"
           echo "=============================="
 
-          check_y() {
+          check_config() {
             NAME="$1"
 
-            STATE="$(
-              "$C" \
-                --file "$CFG" \
-                --state "$NAME" \
-                2>/dev/null || true
-            )"
+            LINE="$(grep -E "^${NAME}=" "$CFG" || true)"
 
-            echo "$NAME = [$STATE]"
+            echo "$NAME -> ${LINE:-UNDEF}"
 
-            if [ "$STATE" != "y" ]; then
+            if [ "$LINE" != "${NAME}=y" ]; then
               echo ""
-              echo "ERROR: $NAME ليس y"
+              echo "ERROR: $NAME ليس =y"
               echo ""
-              echo "محتوى الإعداد المرتبط:"
+              echo "KernelSU / SUSFS configuration:"
               grep -E \
-                "^(CONFIG_KSU|CONFIG_KSU_SUSFS|CONFIG_THREAD_INFO_IN_TASK)" \
+                "^(CONFIG_THREAD_INFO_IN_TASK|CONFIG_KSU|CONFIG_KSU_SUSFS)" \
                 "$CFG" \
                 || true
               exit 1
             fi
           }
 
-          check_y CONFIG_THREAD_INFO_IN_TASK
-          check_y CONFIG_KSU
-          check_y CONFIG_KSU_SUSFS
-          check_y CONFIG_KSU_SUSFS_SUS_PATH
-          check_y CONFIG_KSU_SUSFS_SUS_MOUNT
-          check_y CONFIG_KSU_SUSFS_SUS_KSTAT
-          check_y CONFIG_KSU_SUSFS_SUS_MAP
+          check_config CONFIG_THREAD_INFO_IN_TASK
+          check_config CONFIG_KSU
+          check_config CONFIG_KSU_SUSFS
+          check_config CONFIG_KSU_SUSFS_SUS_PATH
+          check_config CONFIG_KSU_SUSFS_SUS_MOUNT
+          check_config CONFIG_KSU_SUSFS_SUS_KSTAT
+          check_config CONFIG_KSU_SUSFS_SUS_MAP
 
           echo ""
           echo "=============================="
@@ -366,7 +353,7 @@ jobs:
 
 
       # =========================================================
-      # 15. فحص خيارات KernelSU و SUSFS
+      # 15. عرض الإعداد النهائي
       # =========================================================
       - name: فحص إعدادات KSU و SUSFS
         run: |
@@ -478,7 +465,7 @@ jobs:
 
 
       # =========================================================
-      # 20. تحميل Magiskboot من GitHub الرسمي
+      # 20. تحميل Magiskboot
       # =========================================================
       - name: تحميل Magiskboot
         run: |
@@ -514,7 +501,6 @@ print(apk[0])
           echo "$MAGISK_URL"
 
           wget \
-            -f \
             -L \
             --retry-connrefused \
             --tries=5 \
