@@ -128,7 +128,7 @@ jobs:
 
           echo "تم التحقق من وجود تكامل SUSFS داخل KernelSU-Next."
 
-          echo "لن يتم تطبيق patch تكامل KernelSU القديم."
+          echo "لن يتم تطبيق patch تكامل KernelSU القديم مرة أخرى."
 
 
       - name: تطبيق Patch الخاص بـ BG7n و SUSFS
@@ -158,16 +158,16 @@ jobs:
           echo "تم تثبيت ملفات SUSFS."
 
 
-      - name: تجهيز أدوات config
+      - name: تجهيز أداة config
         run: |
           test -f kernel/scripts/config
 
           chmod +x kernel/scripts/config
 
-          echo "أداة kernel/scripts/config موجودة."
+          echo "تم العثور على kernel/scripts/config."
 
 
-      - name: نسخ إعداد النواة الأصلية
+      - name: نسخ إعداد النواة الأصلي
         run: |
           cp \
             stock.config \
@@ -222,7 +222,7 @@ jobs:
             --disable CONFIG_UNUSED_KSYMS \
             || true
 
-          echo "تم تفعيل خيارات KernelSU و SUSFS."
+          echo "تم تفعيل KernelSU و SUSFS."
 
 
       - name: إنشاء إعداد البناء النهائي
@@ -238,23 +238,38 @@ jobs:
           echo "تم إنشاء إعداد البناء النهائي."
 
 
-      - name: فحص خيارات KSU و SUSFS
+      - name: فحص إعدادات KSU و SUSFS
         run: |
-          echo "CONFIG_KSU:"
-          grep '^CONFIG_KSU=' out/.config || true
+          echo "=============================="
+          echo "CONFIG_KSU"
+          echo "=============================="
+          grep '^CONFIG_KSU=' \
+            out/.config || true
 
-          echo "CONFIG_KSU_SUSFS:"
-          grep '^CONFIG_KSU_SUSFS=' out/.config || true
+          echo "=============================="
+          echo "CONFIG_KSU_SUSFS"
+          echo "=============================="
+          grep '^CONFIG_KSU_SUSFS=' \
+            out/.config || true
 
-          echo "CONFIG_KSU_SUSFS_SUS_PATH:"
-          grep '^CONFIG_KSU_SUSFS_SUS_PATH=' out/.config || true
+          echo "=============================="
+          echo "SUSFS OPTIONS"
+          echo "=============================="
 
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT:"
-          grep '^CONFIG_KSU_SUSFS_SUS_MOUNT=' out/.config || true
+          grep '^CONFIG_KSU_SUSFS_' \
+            out/.config || true
 
 
       - name: بناء Kernel Image
+        id: kernel_build
+        continue-on-error: true
         run: |
+          set -o pipefail
+
+          echo "=============================="
+          echo "بدء بناء Kernel Image"
+          echo "=============================="
+
           make \
             -C kernel \
             O="$GITHUB_WORKSPACE/out" \
@@ -263,10 +278,32 @@ jobs:
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             -j"$(nproc)" \
-            Image
+            Image \
+            2>&1 | tee \
+            "$GITHUB_WORKSPACE/kernel-build.log"
+
+          BUILD_STATUS=${PIPESTATUS[0]}
+
+          echo ""
+          echo "=============================="
+          echo "رمز نتيجة البناء: $BUILD_STATUS"
+          echo "=============================="
+
+          exit "$BUILD_STATUS"
 
 
-      - name: التحقق من Kernel Image
+      - name: رفع سجل بناء النواة
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-log
+          path: kernel-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+
+      - name: التحقق من نجاح بناء Kernel Image
+        if: steps.kernel_build.outcome == 'success'
         run: |
           test -s \
             out/arch/arm64/boot/Image
@@ -278,6 +315,14 @@ jobs:
             out/arch/arm64/boot/Image
 
           echo "تم بناء Kernel Image بنجاح."
+
+
+      - name: إيقاف البناء إذا فشل Kernel
+        if: steps.kernel_build.outcome != 'success'
+        run: |
+          echo "فشل بناء Kernel Image."
+          echo "تم حفظ kernel-build.log كـArtifact."
+          exit 1
 
 
       - name: تحميل أداة Magiskboot
@@ -371,7 +416,7 @@ jobs:
           echo "تم إنشاء boot-BG7n-SUSFS-KSU.img."
 
 
-      - name: فحص boot.img النهائي
+      - name: التحقق من boot.img النهائي
         run: |
           test -s \
             boot-BG7n-SUSFS-KSU.img
@@ -395,11 +440,15 @@ jobs:
 
 
       - name: رفع ملفات البناء
+        if: success()
         uses: actions/upload-artifact@v4
-
         with:
           name: BG7n-SUSFS-KSU-build
-
           path: |
             boot-BG7n-SUSFS-KSU.img
-            out/
+            out/arch/arm64/boot/Image
+            out/.config
+            susfs-module-source.tar.gz
+            patches-susfs-bg7n.patch
+          if-no-files-found: error
+          retention-days: 14
