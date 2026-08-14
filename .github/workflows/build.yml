@@ -12,12 +12,12 @@ jobs:
     timeout-minutes: 180
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install build dependencies
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y \
             bc \
@@ -54,7 +54,6 @@ jobs:
           git fetch --depth=1 origin "$KERNEL_COMMIT"
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$KERNEL_COMMIT"
-          echo "Kernel commit:"
           git rev-parse HEAD
 
       - name: Prepare workspace
@@ -81,20 +80,34 @@ jobs:
           echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
-      - name: Verify bundled KernelSU-Next source
+      - name: Select BG7n patch
         run: |
           set -e
 
+          if [ -f "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch" ]; then
+            PATCH_FILE="$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
+          elif [ -f "$GITHUB_WORKSPACE/susfs-bg7n-5.10.237.patch" ]; then
+            PATCH_FILE="$GITHUB_WORKSPACE/susfs-bg7n-5.10.237.patch"
+          else
+            echo "No BG7n patch found. Expected one of:"
+            echo "  patches-susfs-bg7n.patch"
+            echo "  susfs-bg7n-5.10.237.patch"
+            exit 1
+          fi
+
+          test -s "$PATCH_FILE"
+          echo "PATCH_FILE=$PATCH_FILE" >> "$GITHUB_ENV"
+          echo "Using patch: $PATCH_FILE"
+
+      - name: Verify bundled sources
+        run: |
+          set -e
           test -f "$KSU_DIR/kernel/setup.sh"
           test -f "$KSU_DIR/kernel/Kconfig"
           test -f "$KSU_DIR/kernel/Kbuild"
-
           test -f "$SUSFS_DIR/kernel_patches/fs/susfs.c"
           test -f "$SUSFS_DIR/kernel_patches/include/linux/susfs.h"
           test -f "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h"
-
-          echo "Bundled KernelSU-Next source verified."
-          echo "Bundled SUSFS source verified."
 
       - name: Install bundled KernelSU-Next
         run: |
@@ -103,25 +116,26 @@ jobs:
           bash "$GITHUB_WORKSPACE/$KSU_DIR/kernel/setup.sh"
           test -d drivers/kernelsu
 
+      - name: Verify KernelSU-Next SUSFS integration
+        run: |
+          set -e
+          test -f "$KSU_DIR/kernel/Kconfig"
+          test -f "$KSU_DIR/kernel/Kbuild"
+          grep -q 'CONFIG_KSU_SUSFS' "$KSU_DIR/kernel/Kconfig"
+          grep -q 'CONFIG_KSU_SUSFS' "$KSU_DIR/kernel/Kbuild"
+
       - name: Apply BG7n kernel patch
         run: |
           set -e
           cd kernel
-
-          patch -p1 --fuzz=0 \
-            < "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
-
-          test -f fs/susfs.c
-          grep -q 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
+          patch -p1 --fuzz=0 < "$PATCH_FILE"
 
       - name: Install SUSFS source files
         run: |
           set -e
-
           cp "$SUSFS_DIR/kernel_patches/fs/susfs.c" kernel/fs/susfs.c
           cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" kernel/include/linux/susfs.h
           cp "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" kernel/include/linux/susfs_def.h
-
           test -s kernel/fs/susfs.c
           test -s kernel/include/linux/susfs.h
           test -s kernel/include/linux/susfs_def.h
@@ -129,7 +143,6 @@ jobs:
       - name: Prepare kernel config
         run: |
           set -e
-
           test -f kernel/scripts/config
           chmod +x kernel/scripts/config
 
@@ -142,21 +155,23 @@ jobs:
           "$C" --enable CONFIG_THREAD_INFO_IN_TASK
           "$C" --enable CONFIG_KSU
           "$C" --enable CONFIG_KSU_SUSFS
-
           "$C" --enable CONFIG_KSU_SUSFS_SUS_PATH
           "$C" --enable CONFIG_KSU_SUSFS_SUS_MOUNT
           "$C" --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
           "$C" --enable CONFIG_KSU_SUSFS_SUS_KSTAT
           "$C" --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
           "$C" --enable CONFIG_KSU_SUSFS_SUS_MAP
-
+          "$C" --enable CONFIG_KSU_SUSFS_SPOOF_UNAME || true
+          "$C" --enable CONFIG_KSU_SUSFS_ENABLE_LOG || true
+          "$C" --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS || true
+          "$C" --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG || true
+          "$C" --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT || true
           "$C" --disable CONFIG_TRIM_UNUSED_KSYMS || true
           "$C" --disable CONFIG_UNUSED_KSYMS || true
 
       - name: Resolve final Kconfig
         run: |
           set -e
-
           make \
             -C kernel \
             O="$GITHUB_WORKSPACE/out" \
@@ -168,16 +183,15 @@ jobs:
       - name: Verify final config
         run: |
           set -e
-
           CFG="$GITHUB_WORKSPACE/out/.config"
 
-          grep -qx 'CONFIG_THREAD_INFO_IN_TASK=y' "$CFG"
           grep -qx 'CONFIG_KSU=y' "$CFG"
           grep -qx 'CONFIG_KSU_SUSFS=y' "$CFG"
+          grep -qx 'CONFIG_THREAD_INFO_IN_TASK=y'
           grep -qx 'CONFIG_KSU_SUSFS_SUS_PATH=y' "$CFG"
           grep -qx 'CONFIG_KSU_SUSFS_SUS_MOUNT=y' "$CFG"
           grep -qx 'CONFIG_KSU_SUSFS_SUS_KSTAT=y' "$CFG"
-          grep -qx 'CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y'
+          grep -qx 'CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y' "$CFG"
           grep -qx 'CONFIG_KSU_SUSFS_SUS_MAP=y' "$CFG"
 
           cp "$CFG" "$GITHUB_WORKSPACE/final.config"
@@ -195,7 +209,6 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            KCFLAGS="-Wno-error=frame-larger-than" \
             -j"$(nproc)" \
             Image \
             2>&1 | tee "$GITHUB_WORKSPACE/kernel-build.log"
@@ -215,7 +228,10 @@ jobs:
 
           grep -qx 'CONFIG_KSU_SUSFS=y' out/.config
 
-          llvm-nm out/vmlinux 2>/dev/null | grep -qi susfs
+          if ! llvm-nm out/vmlinux 2>/dev/null | grep -qi susfs; then
+            echo "No SUSFS symbols found in vmlinux."
+            exit 1
+          fi
 
       - name: Stop if kernel failed
         if: steps.kernel_build.outcome != 'success'
@@ -227,10 +243,14 @@ jobs:
         run: |
           set -e
 
-          MAGISK_VERSION="v30.7"
-          MAGISK_URL="https://github.com/topjohnwu/Magisk/releases/download/${MAGISK_VERSION}/Magisk-${MAGISK_VERSION}.apk"
+          MAGISK_URL="$({
+            curl -fsSL https://api.github.com/repos/topjohnwu/Magisk/releases/latest || exit 1
+          } | python3 -c 'import json,sys; d=json.load(sys.stdin); a=[x["browser_download_url"] for x in d.get("assets",[]) if x["name"].startswith("Magisk-") and x["name"].endswith(".apk") and "debug" not in x["name"].lower()]; print(a[0] if a else "")')"
 
-          curl -fL \
+          test -n "$MAGISK_URL"
+
+          curl \
+            -fL \
             --retry 5 \
             --retry-delay 3 \
             -o tools/Magisk.apk \
@@ -248,7 +268,9 @@ jobs:
             > tools/magiskboot
 
           test -s tools/magiskboot
+
           chmod +x tools/magiskboot
+
           file tools/magiskboot
 
       - name: Download stock boot image
@@ -264,24 +286,15 @@ jobs:
           gh release download \
             "$RELEASE_TAG" \
             --repo "${{ github.repository }}" \
-            --pattern "*.zip" \
+            --pattern "boot.img.zip" \
             --dir bootwork
 
-          ZIP_FILE="$(find bootwork -maxdepth 1 -type f -name '*.zip' | head -1)"
+          test -s bootwork/boot.img.zip
 
-          test -n "$ZIP_FILE"
-          test -f "$ZIP_FILE"
+          unzip -o \
+            bootwork/boot.img.zip \
+            -d bootwork
 
-          mkdir -p bootwork/extracted
-
-          unzip -o "$ZIP_FILE" -d bootwork/extracted
-
-          BOOT_FILE="$(find bootwork/extracted -type f -name 'boot.img' | head -1)"
-
-          test -n "$BOOT_FILE"
-          test -f "$BOOT_FILE"
-
-          cp "$BOOT_FILE" bootwork/boot.img
           test -s bootwork/boot.img
 
       - name: Unpack stock boot
@@ -290,7 +303,8 @@ jobs:
 
           cd bootwork
 
-          "$GITHUB_WORKSPACE/tools/magiskboot" unpack boot.img
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            unpack boot.img
 
           test -s kernel
 
@@ -310,7 +324,8 @@ jobs:
 
           cd bootwork
 
-          "$GITHUB_WORKSPACE/tools/magiskboot" repack boot.img
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            repack boot.img
 
           test -s new-boot.img
 
@@ -321,7 +336,19 @@ jobs:
           test -s \
             "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
 
-      - name: Package SUSFS source module
+      - name: Verify repacked boot image
+        run: |
+          set -e
+
+          test -s boot-BG7n-SUSFS-KSU.img
+
+          file boot-BG7n-SUSFS-KSU.img
+
+          ls -lh boot-BG7n-SUSFS-KSU.img
+
+          sha256sum boot-BG7n-SUSFS-KSU.img
+
+      - name: Package SUSFS module source
         run: |
           set -e
 
@@ -342,14 +369,6 @@ jobs:
           test -s out/arch/arm64/boot/Image
           test -s final.config
           test -s susfs-module-source.tar.gz
-          test -s patches-susfs-bg7n.patch
-
-          ls -lh \
-            boot-BG7n-SUSFS-KSU.img \
-            out/arch/arm64/boot/Image \
-            final.config \
-            susfs-module-source.tar.gz \
-            patches-susfs-bg7n.patch
 
       - name: Upload build log
         if: always()
@@ -370,7 +389,6 @@ jobs:
             out/arch/arm64/boot/Image
             final.config
             susfs-module-source.tar.gz
-            patches-susfs-bg7n.patch
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
