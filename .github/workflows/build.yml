@@ -53,10 +53,13 @@ jobs:
           test -d drivers/kernelsu
           echo "KernelSU-Next installed."
 
-      - name: Apply SUSFS KernelSU integration patch
+      - name: Verify KernelSU-Next already contains SUSFS integration
         run: |
-          cd "$KSU_DIR"
-          patch -p1 --fuzz=0 < "$GITHUB_WORKSPACE/$SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+          test -f "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
+          grep -q 'menu "KernelSU - SUSFS"' "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
+          grep -q 'CONFIG_KSU_SUSFS' "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
+          echo "KernelSU-Next snapshot already contains SUSFS integration; skipping legacy SUSFS KSU patch."
+          echo "KSU SUSFS integration verified."
 
       - name: Apply BG7n SUSFS kernel patch
         run: |
@@ -115,12 +118,15 @@ jobs:
           chmod +x tools/magiskboot
           tools/magiskboot --help >/dev/null
 
-      - name: Download stock boot.img from GitHub Release
+      - name: Download stock boot.img.zip from GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: stock-boot
         run: |
-          gh release download "$RELEASE_TAG"             --repo "${{ github.repository }}"             --pattern "boot.img"             --dir bootwork
+          mkdir -p bootwork
+          gh release download "$RELEASE_TAG"             --repo "${{ github.repository }}"             --pattern "boot.img.zip"             --dir bootwork
+          test -s bootwork/boot.img.zip
+          unzip -o bootwork/boot.img.zip -d bootwork
           test -s bootwork/boot.img
 
       - name: Repack original boot.img
