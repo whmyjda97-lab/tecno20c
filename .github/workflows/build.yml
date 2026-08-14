@@ -43,7 +43,7 @@ jobs:
             device-tree-compiler
 
 
-      - name: تحميل مصدر نواة Android Common المطابق
+      - name: تحميل مصدر النواة المطابق
         env:
           KERNEL_COMMIT: d09ef2e980e0974a0d6dfe762e29fff118db7f46
         run: |
@@ -58,14 +58,30 @@ jobs:
 
           git checkout --detach FETCH_HEAD
 
-          git status --short --branch
+          echo "تم تحميل مصدر النواة."
 
 
-      - name: تجهيز مصادر SUSFS و KernelSU-Next
+      - name: تنظيف مصدر النواة قبل التعديل
+        run: |
+          make \
+            -C kernel \
+            ARCH=arm64 \
+            mrproper
+
+          rm -rf out
+
+          mkdir -p out
+
+          echo "تم تنظيف مصدر النواة ومجلد البناء."
+
+
+      - name: تجهيز KernelSU-Next و SUSFS
         run: |
           mkdir -p work
 
-          tar -xzf KernelSU-Next.tar.gz -C work
+          tar -xzf \
+            KernelSU-Next.tar.gz \
+            -C work
 
           tar -xzf \
             susfs4ksu-gki-android12-5.10.tar.gz \
@@ -83,6 +99,9 @@ jobs:
 
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
+          echo "KSU_DIR=$KSU_DIR"
+          echo "SUSFS_DIR=$SUSFS_DIR"
+
 
       - name: إضافة KernelSU-Next إلى النواة
         run: |
@@ -96,7 +115,7 @@ jobs:
           echo "تم تثبيت KernelSU-Next بنجاح."
 
 
-      - name: التحقق من وجود تكامل SUSFS داخل KernelSU-Next
+      - name: التحقق من تكامل SUSFS داخل KernelSU-Next
         run: |
           test -f \
             "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
@@ -109,9 +128,9 @@ jobs:
             'CONFIG_KSU_SUSFS' \
             "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
 
-          echo "تكامل SUSFS موجود داخل KernelSU-Next."
+          echo "تم التحقق من تكامل SUSFS."
 
-          echo "لن يتم تطبيق patch القديم مرة ثانية."
+          echo "لن يتم تطبيق patch تكامل KernelSU القديم."
 
 
       - name: تطبيق Patch الخاص بـ BG7n و SUSFS
@@ -121,8 +140,10 @@ jobs:
           patch -p1 --fuzz=0 \
             < "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
 
+          echo "تم تطبيق Patch الخاص بـ BG7n."
 
-      - name: نسخ ملفات SUSFS إلى مصدر النواة
+
+      - name: تثبيت ملفات SUSFS
         run: |
           cp \
             "$SUSFS_DIR/kernel_patches/fs/susfs.c" \
@@ -136,72 +157,82 @@ jobs:
             "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" \
             kernel/include/linux/susfs_def.h
 
+          echo "تم تثبيت ملفات SUSFS."
 
-      - name: تنظيف شجرة النواة قبل البناء
+
+      - name: نسخ إعداد النواة إلى مجلد البناء
         run: |
-          make \
-            -C kernel \
-            ARCH=arm64 \
-            mrproper
+          cp \
+            stock.config \
+            out/.config
 
-          echo "تم تنظيف شجرة النواة."
+          test -s out/.config
+
+          echo "تم وضع stock.config داخل out/.config."
 
 
-      - name: تجهيز إعدادات النواة الأصلية
+      - name: تفعيل KernelSU و SUSFS
         run: |
-          cp stock.config kernel/.config
-
-          cd kernel
-
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU
 
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS
 
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_PATH
 
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_MOUNT
 
           scripts/config \
-            --enable \
-            CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
 
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_KSTAT
 
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
 
           scripts/config \
+            --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_MAP
 
           scripts/config \
+            --file out/.config \
             --disable CONFIG_TRIM_UNUSED_KSYMS \
             || true
 
           scripts/config \
+            --file out/.config \
             --disable CONFIG_UNUSED_KSYMS \
             || true
+
+          echo "تم تفعيل خيارات KernelSU و SUSFS."
 
 
       - name: إنشاء إعداد البناء النهائي
         run: |
-          mkdir -p out
-
           make \
             -C kernel \
             O="$GITHUB_WORKSPACE/out" \
             ARCH=arm64 \
             olddefconfig
 
+          test -s out/.config
+
+          echo "تم إنشاء الإعداد النهائي."
+
 
       - name: بناء Kernel Image
         run: |
-          mkdir -p out
-
           make \
             -C kernel \
             O="$GITHUB_WORKSPACE/out" \
@@ -224,6 +255,8 @@ jobs:
           ls -lh \
             out/arch/arm64/boot/Image
 
+          echo "تم بناء Kernel Image بنجاح."
+
 
       - name: تحميل أداة Magiskboot
         run: |
@@ -242,8 +275,10 @@ jobs:
 
           tools/magiskboot --help >/dev/null
 
+          echo "تم تجهيز Magiskboot."
 
-      - name: تحميل boot.img الأصلي من Release
+
+      - name: تحميل boot.img الأصلي
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: stock-boot
@@ -259,6 +294,11 @@ jobs:
           test -s \
             bootwork/boot.img.zip
 
+          echo "تم تحميل boot.img.zip."
+
+
+      - name: فك ضغط boot.img
+        run: |
           unzip -o \
             bootwork/boot.img.zip \
             -d bootwork
@@ -266,7 +306,7 @@ jobs:
           test -s \
             bootwork/boot.img
 
-          echo "تم الحصول على boot.img الأصلي."
+          echo "تم استخراج boot.img."
 
 
       - name: فك boot.img الأصلي
@@ -278,10 +318,10 @@ jobs:
 
           test -s kernel
 
-          echo "تم فك boot.img بنجاح."
+          echo "تم فك boot.img."
 
 
-      - name: استبدال Kernel الأصلي بالـKernel الجديد
+      - name: استبدال Kernel الأصلي
         run: |
           cp \
             "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" \
@@ -290,7 +330,7 @@ jobs:
           test -s \
             bootwork/kernel
 
-          echo "تم وضع Kernel الجديد داخل boot.img."
+          echo "تم استبدال Kernel الأصلي بالـKernel الجديد."
 
 
       - name: إعادة بناء boot.img
@@ -309,7 +349,7 @@ jobs:
           echo "تم إنشاء boot-BG7n-SUSFS-KSU.img."
 
 
-      - name: التحقق من boot.img الناتج
+      - name: التحقق النهائي من boot.img
         run: |
           test -s \
             boot-BG7n-SUSFS-KSU.img
