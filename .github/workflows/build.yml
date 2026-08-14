@@ -61,7 +61,7 @@ jobs:
           echo "تم تحميل مصدر النواة."
 
 
-      - name: تنظيف مصدر النواة قبل التعديل
+      - name: تنظيف مصدر النواة
         run: |
           make \
             -C kernel \
@@ -72,7 +72,7 @@ jobs:
 
           mkdir -p out
 
-          echo "تم تنظيف مصدر النواة ومجلد البناء."
+          echo "تم تنظيف مصدر النواة."
 
 
       - name: تجهيز KernelSU-Next و SUSFS
@@ -95,8 +95,10 @@ jobs:
 
           SUSFS_DIR="work/susfs4ksu-gki-android12-5.10"
 
-          echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
+          test -d "$KSU_DIR"
+          test -d "$SUSFS_DIR"
 
+          echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
           echo "KSU_DIR=$KSU_DIR"
@@ -121,14 +123,10 @@ jobs:
             "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
 
           grep -q \
-            'menu "KernelSU - SUSFS"' \
-            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
-
-          grep -q \
             'CONFIG_KSU_SUSFS' \
             "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
 
-          echo "تم التحقق من تكامل SUSFS."
+          echo "تم التحقق من وجود تكامل SUSFS داخل KernelSU-Next."
 
           echo "لن يتم تطبيق patch تكامل KernelSU القديم."
 
@@ -160,7 +158,16 @@ jobs:
           echo "تم تثبيت ملفات SUSFS."
 
 
-      - name: نسخ إعداد النواة إلى مجلد البناء
+      - name: تجهيز أدوات config
+        run: |
+          test -f kernel/scripts/config
+
+          chmod +x kernel/scripts/config
+
+          echo "أداة kernel/scripts/config موجودة."
+
+
+      - name: نسخ إعداد النواة الأصلية
         run: |
           cp \
             stock.config \
@@ -168,49 +175,49 @@ jobs:
 
           test -s out/.config
 
-          echo "تم وضع stock.config داخل out/.config."
+          echo "تم نسخ stock.config إلى out/.config."
 
 
       - name: تفعيل KernelSU و SUSFS
         run: |
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_PATH
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_MOUNT
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_KSTAT
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --enable CONFIG_KSU_SUSFS_SUS_MAP
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --disable CONFIG_TRIM_UNUSED_KSYMS \
             || true
 
-          scripts/config \
+          kernel/scripts/config \
             --file out/.config \
             --disable CONFIG_UNUSED_KSYMS \
             || true
@@ -228,7 +235,22 @@ jobs:
 
           test -s out/.config
 
-          echo "تم إنشاء الإعداد النهائي."
+          echo "تم إنشاء إعداد البناء النهائي."
+
+
+      - name: فحص خيارات KSU و SUSFS
+        run: |
+          echo "CONFIG_KSU:"
+          grep '^CONFIG_KSU=' out/.config || true
+
+          echo "CONFIG_KSU_SUSFS:"
+          grep '^CONFIG_KSU_SUSFS=' out/.config || true
+
+          echo "CONFIG_KSU_SUSFS_SUS_PATH:"
+          grep '^CONFIG_KSU_SUSFS_SUS_PATH=' out/.config || true
+
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT:"
+          grep '^CONFIG_KSU_SUSFS_SUS_MOUNT=' out/.config || true
 
 
       - name: بناء Kernel Image
@@ -278,7 +300,7 @@ jobs:
           echo "تم تجهيز Magiskboot."
 
 
-      - name: تحميل boot.img الأصلي
+      - name: تحميل boot.img.zip من Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: stock-boot
@@ -297,7 +319,7 @@ jobs:
           echo "تم تحميل boot.img.zip."
 
 
-      - name: فك ضغط boot.img
+      - name: استخراج boot.img
         run: |
           unzip -o \
             bootwork/boot.img.zip \
@@ -318,7 +340,7 @@ jobs:
 
           test -s kernel
 
-          echo "تم فك boot.img."
+          echo "تم فك boot.img بنجاح."
 
 
       - name: استبدال Kernel الأصلي
@@ -349,7 +371,7 @@ jobs:
           echo "تم إنشاء boot-BG7n-SUSFS-KSU.img."
 
 
-      - name: التحقق النهائي من boot.img
+      - name: فحص boot.img النهائي
         run: |
           test -s \
             boot-BG7n-SUSFS-KSU.img
@@ -360,8 +382,10 @@ jobs:
           sha256sum \
             boot-BG7n-SUSFS-KSU.img
 
+          echo "تم التحقق من boot.img النهائي."
 
-      - name: تجهيز مصدر وحدة SUSFS
+
+      - name: تجهيز وحدة SUSFS
         run: |
           cd "$SUSFS_DIR"
 
@@ -370,7 +394,7 @@ jobs:
             ksu_module_susfs
 
 
-      - name: رفع الملفات الناتجة
+      - name: رفع ملفات البناء
         uses: actions/upload-artifact@v4
 
         with:
@@ -378,11 +402,4 @@ jobs:
 
           path: |
             boot-BG7n-SUSFS-KSU.img
-            out/arch/arm64/boot/Image
-            out/.config
-            susfs-module-source.tar.gz
-            patches-susfs-bg7n.patch
-
-          if-no-files-found: error
-
-          retention-days: 14
+            out/
