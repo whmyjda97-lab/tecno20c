@@ -1,4 +1,4 @@
-name: Build BG7n SUSFS + KernelSU-Next
+name: بناء BG7n مع SUSFS و KernelSU-Next
 
 on:
   workflow_dispatch:
@@ -12,89 +12,199 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout build recipe
+
+      - name: تحميل ملفات المشروع
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+
+      - name: تثبيت أدوات البناء
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential ccache clang flex \
-            gcc-aarch64-linux-gnu git libssl-dev libelf-dev \
-            lld llvm python3 python3-pip rsync unzip wget xz-utils \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            libssl-dev \
+            libelf-dev \
+            lld \
+            llvm \
+            python3 \
+            python3-pip \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
             device-tree-compiler
 
-      - name: Fetch exact Android common kernel
+
+      - name: تحميل مصدر نواة Android Common المطابق
         env:
           KERNEL_COMMIT: d09ef2e980e0974a0d6dfe762e29fff118db7f46
         run: |
           git init kernel
+
           cd kernel
-          git remote add origin https://android.googlesource.com/kernel/common
+
+          git remote add origin \
+            https://android.googlesource.com/kernel/common
+
           git fetch --depth=1 origin "$KERNEL_COMMIT"
+
           git checkout --detach FETCH_HEAD
+
           git status --short --branch
 
-      - name: Prepare SUSFS and KernelSU-Next sources
+
+      - name: تجهيز مصادر SUSFS و KernelSU-Next
         run: |
           mkdir -p work
+
           tar -xzf KernelSU-Next.tar.gz -C work
-          tar -xzf susfs4ksu-gki-android12-5.10.tar.gz -C work
-          KSU_DIR="$(find work -maxdepth 1 -type d -name 'KernelSU-Next-*' | head -1)"
+
+          tar -xzf \
+            susfs4ksu-gki-android12-5.10.tar.gz \
+            -C work
+
+          KSU_DIR="$(find work \
+            -maxdepth 1 \
+            -type d \
+            -name 'KernelSU-Next-*' \
+            | head -1)"
+
           SUSFS_DIR="work/susfs4ksu-gki-android12-5.10"
 
           echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
+
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
-      - name: Add KernelSU-Next to kernel
+
+      - name: إضافة KernelSU-Next إلى النواة
         run: |
           cd kernel
-          bash "$GITHUB_WORKSPACE/$KSU_DIR/kernel/setup.sh"
+
+          bash \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/setup.sh"
+
           test -d drivers/kernelsu
-          echo "KernelSU-Next installed."
 
-      - name: Verify KernelSU-Next already contains SUSFS integration
+          echo "تم تثبيت KernelSU-Next بنجاح."
+
+
+      - name: التحقق من وجود تكامل SUSFS داخل KernelSU-Next
         run: |
-          test -f "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
-          grep -q 'menu "KernelSU - SUSFS"' "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
-          grep -q 'CONFIG_KSU_SUSFS' "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
-          echo "KernelSU-Next snapshot already contains SUSFS integration; skipping legacy SUSFS KSU patch."
-          echo "KSU SUSFS integration verified."
+          test -f \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
 
-      - name: Apply BG7n SUSFS kernel patch
+          grep -q \
+            'menu "KernelSU - SUSFS"' \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
+
+          grep -q \
+            'CONFIG_KSU_SUSFS' \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
+
+          echo "تكامل SUSFS موجود داخل KernelSU-Next."
+
+          echo "لن يتم تطبيق patch القديم مرة ثانية."
+
+
+      - name: تطبيق Patch الخاص بـ BG7n و SUSFS
         run: |
           cd kernel
-          patch -p1 --fuzz=0 < "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
 
-      - name: Install SUSFS source files
+          patch -p1 --fuzz=0 \
+            < "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
+
+
+      - name: نسخ ملفات SUSFS إلى مصدر النواة
         run: |
-          cp "$SUSFS_DIR/kernel_patches/fs/susfs.c" kernel/fs/susfs.c
-          cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" kernel/include/linux/susfs.h
-          cp "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" kernel/include/linux/susfs_def.h
+          cp \
+            "$SUSFS_DIR/kernel_patches/fs/susfs.c" \
+            kernel/fs/susfs.c
 
-      - name: Restore stock config and enable KSU/SUSFS
+          cp \
+            "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" \
+            kernel/include/linux/susfs.h
+
+          cp \
+            "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" \
+            kernel/include/linux/susfs_def.h
+
+
+      - name: تنظيف شجرة النواة قبل البناء
+        run: |
+          make \
+            -C kernel \
+            ARCH=arm64 \
+            mrproper
+
+          echo "تم تنظيف شجرة النواة."
+
+
+      - name: تجهيز إعدادات النواة الأصلية
         run: |
           cp stock.config kernel/.config
+
           cd kernel
 
-          # Keep the original device/kernel configuration and only enable
-          # the options required by KernelSU/SUSFS.
-          scripts/config --enable CONFIG_KSU
-          scripts/config --enable CONFIG_KSU_SUSFS
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-          scripts/config --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
-          scripts/config --enable CONFIG_KSU_SUSFS_SUS_MAP
-          scripts/config --disable CONFIG_TRIM_UNUSED_KSYMS || true
-          scripts/config --disable CONFIG_UNUSED_KSYMS || true
-          make O="$GITHUB_WORKSPACE/out" ARCH=arm64 olddefconfig
+          scripts/config \
+            --enable CONFIG_KSU
 
-      - name: Build arm64 Image
+          scripts/config \
+            --enable CONFIG_KSU_SUSFS
+
+          scripts/config \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH
+
+          scripts/config \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+
+          scripts/config \
+            --enable \
+            CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
+
+          scripts/config \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+
+          scripts/config \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
+
+          scripts/config \
+            --enable CONFIG_KSU_SUSFS_SUS_MAP
+
+          scripts/config \
+            --disable CONFIG_TRIM_UNUSED_KSYMS \
+            || true
+
+          scripts/config \
+            --disable CONFIG_UNUSED_KSYMS \
+            || true
+
+
+      - name: إنشاء إعداد البناء النهائي
         run: |
           mkdir -p out
-          make -C kernel O="$GITHUB_WORKSPACE/out" \
+
+          make \
+            -C kernel \
+            O="$GITHUB_WORKSPACE/out" \
+            ARCH=arm64 \
+            olddefconfig
+
+
+      - name: بناء Kernel Image
+        run: |
+          mkdir -p out
+
+          make \
+            -C kernel \
+            O="$GITHUB_WORKSPACE/out" \
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -102,65 +212,137 @@ jobs:
             -j"$(nproc)" \
             Image
 
-      - name: Verify kernel image
-        run: |
-          test -s out/arch/arm64/boot/Image
-          file out/arch/arm64/boot/Image
-          ls -lh out/arch/arm64/boot/Image
 
-      - name: Download Magisk boot image tool
+      - name: التحقق من Kernel Image
+        run: |
+          test -s \
+            out/arch/arm64/boot/Image
+
+          file \
+            out/arch/arm64/boot/Image
+
+          ls -lh \
+            out/arch/arm64/boot/Image
+
+
+      - name: تحميل أداة Magiskboot
         run: |
           mkdir -p tools
-          wget -q -O tools/magisk.apk \
+
+          wget -q -O \
+            tools/magisk.apk \
             https://github.com/topjohnwu/Magisk/releases/latest/download/Magisk.apk
-          unzip -p tools/magisk.apk \
-            lib/x86_64/libmagiskboot.so > tools/magiskboot
+
+          unzip -p \
+            tools/magisk.apk \
+            lib/x86_64/libmagiskboot.so \
+            > tools/magiskboot
+
           chmod +x tools/magiskboot
+
           tools/magiskboot --help >/dev/null
 
-      - name: Download stock boot.img.zip from GitHub Release
+
+      - name: تحميل boot.img الأصلي من Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: stock-boot
         run: |
           mkdir -p bootwork
-          gh release download "$RELEASE_TAG"             --repo "${{ github.repository }}"             --pattern "boot.img.zip"             --dir bootwork
-          test -s bootwork/boot.img.zip
-          unzip -o bootwork/boot.img.zip -d bootwork
-          test -s bootwork/boot.img
 
-      - name: Repack original boot.img
+          gh release download \
+            "$RELEASE_TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "boot.img.zip" \
+            --dir bootwork
+
+          test -s \
+            bootwork/boot.img.zip
+
+          unzip -o \
+            bootwork/boot.img.zip \
+            -d bootwork
+
+          test -s \
+            bootwork/boot.img
+
+          echo "تم الحصول على boot.img الأصلي."
+
+
+      - name: فك boot.img الأصلي
         run: |
           cd bootwork
-          "$GITHUB_WORKSPACE/tools/magiskboot" unpack boot.img
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            unpack boot.img
 
           test -s kernel
-          cp "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" kernel
 
-          "$GITHUB_WORKSPACE/tools/magiskboot" repack boot.img
-          test -s new-boot.img
-          mv new-boot.img "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+          echo "تم فك boot.img بنجاح."
 
-      - name: Verify repacked boot image
+
+      - name: استبدال Kernel الأصلي بالـKernel الجديد
         run: |
-          "$GITHUB_WORKSPACE/tools/magiskboot" --help >/dev/null
-          ls -lh boot-BG7n-SUSFS-KSU.img
-          sha256sum boot-BG7n-SUSFS-KSU.img
+          cp \
+            "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" \
+            bootwork/kernel
 
-      - name: Package SUSFS module
+          test -s \
+            bootwork/kernel
+
+          echo "تم وضع Kernel الجديد داخل boot.img."
+
+
+      - name: إعادة بناء boot.img
+        run: |
+          cd bootwork
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            repack boot.img
+
+          test -s new-boot.img
+
+          mv \
+            new-boot.img \
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+
+          echo "تم إنشاء boot-BG7n-SUSFS-KSU.img."
+
+
+      - name: التحقق من boot.img الناتج
+        run: |
+          test -s \
+            boot-BG7n-SUSFS-KSU.img
+
+          ls -lh \
+            boot-BG7n-SUSFS-KSU.img
+
+          sha256sum \
+            boot-BG7n-SUSFS-KSU.img
+
+
+      - name: تجهيز مصدر وحدة SUSFS
         run: |
           cd "$SUSFS_DIR"
-          tar -czf "$GITHUB_WORKSPACE/susfs-module-source.tar.gz" ksu_module_susfs
 
-      - name: Upload build artifacts
+          tar -czf \
+            "$GITHUB_WORKSPACE/susfs-module-source.tar.gz" \
+            ksu_module_susfs
+
+
+      - name: رفع الملفات الناتجة
         uses: actions/upload-artifact@v4
+
         with:
           name: BG7n-SUSFS-KSU-build
+
           path: |
             boot-BG7n-SUSFS-KSU.img
             out/arch/arm64/boot/Image
             out/.config
             susfs-module-source.tar.gz
             patches-susfs-bg7n.patch
+
           if-no-files-found: error
+
           retention-days: 14
