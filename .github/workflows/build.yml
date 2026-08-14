@@ -13,12 +13,20 @@ jobs:
 
     steps:
 
+      # =========================================================
+      # 1. تحميل ملفات المشروع
+      # =========================================================
       - name: تحميل ملفات المشروع
         uses: actions/checkout@v4
 
+
+      # =========================================================
+      # 2. تثبيت أدوات البناء
+      # =========================================================
       - name: تثبيت أدوات البناء
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             bc \
             bison \
@@ -43,28 +51,64 @@ jobs:
             device-tree-compiler \
             file
 
+
+      # =========================================================
+      # 3. تحميل مصدر Android Common Kernel المطابق
+      # =========================================================
       - name: تحميل مصدر النواة المطابق
         env:
           KERNEL_COMMIT: d09ef2e980e0974a0d6dfe762e29fff118db7f46
         run: |
           git init kernel
+
           cd kernel
-          git remote add origin https://android.googlesource.com/kernel/common
+
+          git remote add origin \
+            https://android.googlesource.com/kernel/common
+
           git fetch --depth=1 origin "$KERNEL_COMMIT"
+
           git checkout --detach FETCH_HEAD
+
+          echo "Kernel source commit:"
           git rev-parse HEAD
 
+
+      # =========================================================
+      # 4. تجهيز مجلدات العمل
+      # =========================================================
       - name: تجهيز مجلدات العمل
         run: |
-          rm -rf out work tools bootwork
-          mkdir -p out work tools bootwork
+          rm -rf out
+          rm -rf work
+          rm -rf tools
+          rm -rf bootwork
 
+          mkdir -p out
+          mkdir -p work
+          mkdir -p tools
+          mkdir -p bootwork
+
+
+      # =========================================================
+      # 5. تجهيز KernelSU-Next و SUSFS
+      # =========================================================
       - name: تجهيز KernelSU-Next و SUSFS
         run: |
-          tar -xzf KernelSU-Next.tar.gz -C work
-          tar -xzf susfs4ksu-gki-android12-5.10.tar.gz -C work
+          tar -xzf \
+            KernelSU-Next.tar.gz \
+            -C work
 
-          KSU_DIR="$(find work -maxdepth 1 -type d -name 'KernelSU-Next-*' | head -1)"
+          tar -xzf \
+            susfs4ksu-gki-android12-5.10.tar.gz \
+            -C work
+
+          KSU_DIR="$(find work \
+            -maxdepth 1 \
+            -type d \
+            -name 'KernelSU-Next-*' \
+            | head -1)"
+
           SUSFS_DIR="work/susfs4ksu-gki-android12-5.10"
 
           test -d "$KSU_DIR"
@@ -73,76 +117,209 @@ jobs:
           echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
+          echo "KernelSU directory:"
+          echo "$KSU_DIR"
+
+          echo "SUSFS directory:"
+          echo "$SUSFS_DIR"
+
+
+      # =========================================================
+      # 6. إضافة KernelSU-Next إلى النواة
+      # =========================================================
       - name: إضافة KernelSU-Next إلى النواة
         run: |
           cd kernel
-          bash "$GITHUB_WORKSPACE/$KSU_DIR/kernel/setup.sh"
+
+          bash \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/setup.sh"
+
           test -d drivers/kernelsu
 
+          echo "تم تثبيت KernelSU-Next بنجاح."
+
+
+      # =========================================================
+      # 7. التحقق من تكامل SUSFS داخل KernelSU-Next
+      #
+      # مهم:
+      # لا نطبق 10_enable_susfs_for_ksu.patch مرة ثانية.
+      # =========================================================
       - name: التحقق من تكامل SUSFS داخل KernelSU-Next
         run: |
-          test -f "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
-          test -f "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
+          test -f \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kconfig"
 
-          if grep -Rqs "CONFIG_KSU_SUSFS" "$GITHUB_WORKSPACE/$KSU_DIR/kernel"; then
-            echo "SUSFS موجود داخل KernelSU-Next."
+          test -f \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/Kbuild"
+
+          if grep -Rqs "CONFIG_KSU_SUSFS" \
+            "$GITHUB_WORKSPACE/$KSU_DIR/kernel"; then
+
+            echo "تم العثور على تكامل SUSFS داخل KernelSU-Next."
+
           else
-            echo "CONFIG_KSU_SUSFS غير موجود."
+
+            echo "لم يتم العثور على CONFIG_KSU_SUSFS داخل KernelSU-Next."
             exit 1
+
           fi
 
           echo "سيتم تخطي patch 10_enable_susfs_for_ksu.patch."
 
+
+      # =========================================================
+      # 8. تطبيق Patch الخاص بـ BG7n
+      # =========================================================
       - name: تطبيق Patch الخاص بـ BG7n
         run: |
           cd kernel
-          patch -p1 --fuzz=0 < "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
 
+          patch -p1 --fuzz=0 \
+            < "$GITHUB_WORKSPACE/patches-susfs-bg7n.patch"
+
+          echo "تم تطبيق Patch الخاص بـ BG7n."
+
+
+      # =========================================================
+      # 9. تثبيت ملفات SUSFS
+      # =========================================================
       - name: تثبيت ملفات SUSFS
         run: |
-          cp "$SUSFS_DIR/kernel_patches/fs/susfs.c" kernel/fs/susfs.c
-          cp "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" kernel/include/linux/susfs.h
-          cp "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" kernel/include/linux/susfs_def.h
+          cp \
+            "$SUSFS_DIR/kernel_patches/fs/susfs.c" \
+            kernel/fs/susfs.c
+
+          cp \
+            "$SUSFS_DIR/kernel_patches/include/linux/susfs.h" \
+            kernel/include/linux/susfs.h
+
+          cp \
+            "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" \
+            kernel/include/linux/susfs_def.h
 
           test -f kernel/fs/susfs.c
           test -f kernel/include/linux/susfs.h
           test -f kernel/include/linux/susfs_def.h
 
+          echo "تم تثبيت ملفات SUSFS."
+
+
+      # =========================================================
+      # 10. تجهيز أداة config
+      # =========================================================
       - name: تجهيز أداة config
         run: |
           test -f kernel/scripts/config
+
           chmod +x kernel/scripts/config
 
+          echo "تم العثور على kernel/scripts/config."
+
+
+      # =========================================================
+      # 11. تجهيز Kernel Config
+      # =========================================================
       - name: تجهيز Kernel Config
         run: |
-          cp stock.config out/.config
+          cp \
+            stock.config \
+            out/.config
+
           test -s out/.config
 
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_PATH
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
-          kernel/scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_MAP
-          kernel/scripts/config --file out/.config --disable CONFIG_TRIM_UNUSED_KSYMS || true
-          kernel/scripts/config --file out/.config --disable CONFIG_UNUSED_KSYMS || true
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU
 
-          make -C kernel O="$GITHUB_WORKSPACE/out" ARCH=arm64 olddefconfig
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_NATIVE_APP
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT
+
+          kernel/scripts/config \
+            --file out/.config \
+            --enable CONFIG_KSU_SUSFS_SUS_MAP
+
+          kernel/scripts/config \
+            --file out/.config \
+            --disable CONFIG_TRIM_UNUSED_KSYMS \
+            || true
+
+          kernel/scripts/config \
+            --file out/.config \
+            --disable CONFIG_UNUSED_KSYMS \
+            || true
+
+          make \
+            -C kernel \
+            O="$GITHUB_WORKSPACE/out" \
+            ARCH=arm64 \
+            olddefconfig
+
           test -s out/.config
 
+          echo "تم تجهيز Kernel Config."
+
+
+      # =========================================================
+      # 12. فحص خيارات KSU و SUSFS
+      # =========================================================
       - name: فحص إعدادات KSU و SUSFS
         run: |
-          grep '^CONFIG_KSU=' out/.config || true
-          grep '^CONFIG_KSU_SUSFS=' out/.config || true
-          grep '^CONFIG_KSU_SUSFS_' out/.config || true
+          echo "=============================="
+          echo "KernelSU"
+          echo "=============================="
 
+          grep '^CONFIG_KSU=' \
+            out/.config || true
+
+          echo "=============================="
+          echo "SUSFS"
+          echo "=============================="
+
+          grep '^CONFIG_KSU_SUSFS=' \
+            out/.config || true
+
+          echo "=============================="
+          echo "SUSFS OPTIONS"
+          echo "=============================="
+
+          grep '^CONFIG_KSU_SUSFS_' \
+            out/.config || true
+
+
+      # =========================================================
+      # 13. بناء Kernel Image
+      # =========================================================
       - name: بناء Kernel Image
         id: kernel_build
         continue-on-error: true
         run: |
           set -o pipefail
+
+          echo "=============================="
+          echo "بدء بناء Kernel Image"
+          echo "=============================="
 
           make \
             -C kernel \
@@ -153,12 +330,23 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             KCFLAGS="-Wno-error=frame-larger-than" \
             -j"$(nproc)" \
-            Image 2>&1 | tee "$GITHUB_WORKSPACE/kernel-build.log"
+            Image \
+            2>&1 | tee \
+            "$GITHUB_WORKSPACE/kernel-build.log"
 
           BUILD_STATUS=${PIPESTATUS[0]}
-          echo "Kernel build status: $BUILD_STATUS"
+
+          echo ""
+          echo "=============================="
+          echo "رمز نتيجة البناء: $BUILD_STATUS"
+          echo "=============================="
+
           exit "$BUILD_STATUS"
 
+
+      # =========================================================
+      # 14. حفظ سجل البناء دائمًا
+      # =========================================================
       - name: رفع سجل بناء النواة
         if: always()
         uses: actions/upload-artifact@v4
@@ -168,53 +356,129 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+
+      # =========================================================
+      # 15. التحقق من نجاح Kernel Image
+      # =========================================================
       - name: التحقق من نجاح بناء Kernel Image
         if: steps.kernel_build.outcome == 'success'
         run: |
-          test -s out/arch/arm64/boot/Image
-          file out/arch/arm64/boot/Image
-          ls -lh out/arch/arm64/boot/Image
+          test -s \
+            out/arch/arm64/boot/Image
 
+          file \
+            out/arch/arm64/boot/Image
+
+          ls -lh \
+            out/arch/arm64/boot/Image
+
+          echo "تم بناء Kernel Image بنجاح."
+
+
+      # =========================================================
+      # 16. إيقاف البناء إذا فشل Kernel
+      # =========================================================
       - name: إيقاف البناء إذا فشل Kernel
         if: steps.kernel_build.outcome != 'success'
         run: |
           echo "فشل بناء Kernel Image."
           exit 1
 
-      - name: تحميل Magiskboot
+
+      # =========================================================
+      # 17. تحميل Magisk APK الرسمي
+      #
+      # الإصلاح هنا:
+      # لا نستخدم wget -f
+      # نستخدم curl -fL
+      #
+      # ولا نختار app-debug.apk
+      # =========================================================
+      - name: تحميل Magisk APK الرسمي
         run: |
           set -e
 
+          echo "البحث عن ملف Magisk APK الرسمي..."
+
           MAGISK_URL="$(
-            python3 -c 'import json,sys,urllib.request; d=json.load(urllib.request.urlopen("https://api.github.com/repos/topjohnwu/Magisk/releases/latest")); a=[x["browser_download_url"] for x in d.get("assets",[]) if x["name"].lower().endswith(".apk")]; print(a[0] if a else (_ for _ in ()).throw(SystemExit("لم يتم العثور على Magisk APK")))'
+            curl -fsSL \
+              https://api.github.com/repos/topjohnwu/Magisk/releases/latest \
+            | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+
+assets = data.get("assets", [])
+
+candidates = [
+    a["browser_download_url"]
+    for a in assets
+    if a["name"].startswith("Magisk-")
+    and a["name"].endswith(".apk")
+    and "debug" not in a["name"].lower()
+]
+
+if not candidates:
+    raise SystemExit("لم يتم العثور على Magisk APK الرسمي")
+
+print(candidates[0])
+'
           )"
 
+          echo "Magisk URL:"
           echo "$MAGISK_URL"
 
-          wget -fL \
-            --retry-connrefused \
-            --tries=5 \
-            --waitretry=3 \
-            -O tools/Magisk.apk \
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            -o tools/Magisk.apk \
             "$MAGISK_URL"
 
           test -s tools/Magisk.apk
 
+          echo "تم تحميل Magisk APK بنجاح."
+
+
+      # =========================================================
+      # 18. استخراج Magiskboot
+      # =========================================================
       - name: استخراج Magiskboot
         run: |
           set -e
 
-          unzip -l tools/Magisk.apk | grep magiskboot
+          echo "البحث عن libmagiskboot داخل APK..."
 
-          unzip -p tools/Magisk.apk \
+          unzip -l \
+            tools/Magisk.apk \
+            | grep \
+            'libmagiskboot.so'
+
+          unzip -p \
+            tools/Magisk.apk \
             lib/x86_64/libmagiskboot.so \
             > tools/magiskboot
 
           test -s tools/magiskboot
+
           chmod +x tools/magiskboot
+
           file tools/magiskboot
+
           tools/magiskboot --help
 
+          echo "تم تجهيز Magiskboot بنجاح."
+
+
+      # =========================================================
+      # 19. تحميل boot.img من Release
+      #
+      # Tag:
+      # stock-boot
+      #
+      # ZIP يحتوي:
+      # boot.img
+      # =========================================================
       - name: تحميل boot.img من Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -223,6 +487,7 @@ jobs:
           set -e
 
           rm -rf bootwork
+
           mkdir -p bootwork
 
           gh release download \
@@ -231,45 +496,95 @@ jobs:
             --pattern "*.zip" \
             --dir bootwork
 
-          ZIP_FILE="$(find bootwork -maxdepth 1 -type f -name '*.zip' | head -1)"
+          echo "ملفات Release:"
+          ls -lh bootwork
+
+          ZIP_FILE="$(
+            find bootwork \
+              -maxdepth 1 \
+              -type f \
+              -name "*.zip" \
+              | head -1
+          )"
 
           test -n "$ZIP_FILE"
           test -f "$ZIP_FILE"
 
-          mkdir -p bootwork/extracted
-          unzip -o "$ZIP_FILE" -d bootwork/extracted
+          echo "سيتم استخدام:"
+          echo "$ZIP_FILE"
 
-          BOOT_FILE="$(find bootwork/extracted -type f -name 'boot.img' | head -1)"
+          mkdir -p bootwork/extracted
+
+          unzip -o \
+            "$ZIP_FILE" \
+            -d bootwork/extracted
+
+          BOOT_FILE="$(
+            find bootwork/extracted \
+              -type f \
+              -name "boot.img" \
+              | head -1
+          )"
 
           test -n "$BOOT_FILE"
           test -f "$BOOT_FILE"
 
-          cp "$BOOT_FILE" bootwork/boot.img
-          test -s bootwork/boot.img
+          cp \
+            "$BOOT_FILE" \
+            bootwork/boot.img
 
+          test -s \
+            bootwork/boot.img
+
+          echo "تم الحصول على boot.img الأصلي."
+
+
+      # =========================================================
+      # 20. فك boot.img
+      # =========================================================
       - name: فك boot.img الأصلي
         run: |
           cd bootwork
-          "$GITHUB_WORKSPACE/tools/magiskboot" unpack boot.img
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            unpack boot.img
+
           test -s kernel
+
+          echo "تم فك boot.img بنجاح."
+
           file kernel
+
           ls -lh kernel
 
+
+      # =========================================================
+      # 21. استبدال Kernel الأصلي
+      # =========================================================
       - name: استبدال Kernel الأصلي
         run: |
-          test -s out/arch/arm64/boot/Image
+          test -s \
+            out/arch/arm64/boot/Image
 
           cp \
             out/arch/arm64/boot/Image \
             bootwork/kernel
 
-          test -s bootwork/kernel
+          test -s \
+            bootwork/kernel
 
+          echo "تم استبدال Kernel الأصلي."
+
+
+      # =========================================================
+      # 22. إعادة بناء boot.img
+      # =========================================================
       - name: إعادة بناء boot.img
         run: |
           cd bootwork
 
-          "$GITHUB_WORKSPACE/tools/magiskboot" repack boot.img
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            repack boot.img
 
           test -s new-boot.img
 
@@ -277,16 +592,37 @@ jobs:
             new-boot.img \
             "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
 
-          test -s "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+          test -s \
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
 
+          echo "تم إنشاء boot-BG7n-SUSFS-KSU.img."
+
+
+      # =========================================================
+      # 23. فحص boot النهائي
+      # =========================================================
       - name: فحص boot النهائي
         run: |
-          test -s boot-BG7n-SUSFS-KSU.img
+          test -s \
+            boot-BG7n-SUSFS-KSU.img
 
-          ls -lh boot-BG7n-SUSFS-KSU.img
-          sha256sum boot-BG7n-SUSFS-KSU.img
-          file boot-BG7n-SUSFS-KSU.img
+          echo "=============================="
+          echo "BOOT FINAL"
+          echo "=============================="
 
+          ls -lh \
+            boot-BG7n-SUSFS-KSU.img
+
+          sha256sum \
+            boot-BG7n-SUSFS-KSU.img
+
+          file \
+            boot-BG7n-SUSFS-KSU.img
+
+
+      # =========================================================
+      # 24. تجهيز SUSFS Module
+      # =========================================================
       - name: تجهيز SUSFS Module
         run: |
           cd "$SUSFS_DIR"
@@ -295,15 +631,31 @@ jobs:
             "$GITHUB_WORKSPACE/susfs-module-source.tar.gz" \
             ksu_module_susfs
 
-          test -s "$GITHUB_WORKSPACE/susfs-module-source.tar.gz"
+          test -s \
+            "$GITHUB_WORKSPACE/susfs-module-source.tar.gz"
 
-      - name: التحقق من ملفات Artifact
+
+      # =========================================================
+      # 25. التحقق من ملفات Artifact
+      # =========================================================
+      - name: فحص ملفات Artifact
         run: |
-          test -s boot-BG7n-SUSFS-KSU.img
-          test -s out/arch/arm64/boot/Image
-          test -s out/.config
-          test -s susfs-module-source.tar.gz
-          test -s patches-susfs-bg7n.patch
+          test -s \
+            boot-BG7n-SUSFS-KSU.img
+
+          test -s \
+            out/arch/arm64/boot/Image
+
+          test -s \
+            out/.config
+
+          test -s \
+            susfs-module-source.tar.gz
+
+          test -s \
+            patches-susfs-bg7n.patch
+
+          echo "الملفات الجاهزة للرفع:"
 
           ls -lh \
             boot-BG7n-SUSFS-KSU.img \
@@ -312,15 +664,22 @@ jobs:
             susfs-module-source.tar.gz \
             patches-susfs-bg7n.patch
 
+
+      # =========================================================
+      # 26. رفع Artifact النهائي
+      # =========================================================
       - name: رفع ملفات البناء النهائية
         uses: actions/upload-artifact@v4
         with:
           name: BG7n-SUSFS-KSU-build-${{ github.run_number }}
+
           path: |
             boot-BG7n-SUSFS-KSU.img
             out/arch/arm64/boot/Image
             out/.config
             susfs-module-source.tar.gz
             patches-susfs-bg7n.patch
+
           if-no-files-found: error
+
           retention-days: 14
