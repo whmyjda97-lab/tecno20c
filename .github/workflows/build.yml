@@ -40,7 +40,8 @@ jobs:
             unzip \
             wget \
             xz-utils \
-            device-tree-compiler
+            device-tree-compiler \
+            curl
 
 
       - name: تحميل مصدر النواة المطابق
@@ -128,7 +129,7 @@ jobs:
 
           echo "تم التحقق من وجود تكامل SUSFS داخل KernelSU-Next."
 
-          echo "لن يتم تطبيق patch تكامل KernelSU القديم."
+          echo "لن يتم تطبيق patch تكامل KernelSU القديم مرة أخرى."
 
 
       - name: تطبيق Patch الخاص بـ BG7n و SUSFS
@@ -243,12 +244,14 @@ jobs:
           echo "=============================="
           echo "CONFIG_KSU"
           echo "=============================="
+
           grep '^CONFIG_KSU=' \
             out/.config || true
 
           echo "=============================="
           echo "CONFIG_KSU_SUSFS"
           echo "=============================="
+
           grep '^CONFIG_KSU_SUSFS=' \
             out/.config || true
 
@@ -326,24 +329,70 @@ jobs:
           exit 1
 
 
-      - name: تحميل أداة Magiskboot
+      - name: تحميل Magiskboot من GitHub الرسمي
         run: |
+          set -e
+
           mkdir -p tools
 
-          wget -q -O \
+          echo "جلب أحدث إصدار من Magisk..."
+
+          MAGISK_URL="$(
+            curl -fsSL \
+              https://api.github.com/repos/topjohnwu/Magisk/releases/latest \
+            | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+
+urls = [
+    a["browser_download_url"]
+    for a in data.get("assets", [])
+    if a["name"].lower().endswith(".apk")
+]
+
+if not urls:
+    raise SystemExit("لم يتم العثور على Magisk APK")
+
+print(urls[0])
+'
+          )"
+
+          echo "رابط Magisk:"
+          echo "$MAGISK_URL"
+
+          wget -fL \
+            --retry-connrefused \
+            --tries=3 \
+            -O tools/magisk.apk \
+            "$MAGISK_URL"
+
+          test -s tools/magisk.apk
+
+          echo "فحص محتويات APK..."
+
+          unzip -l \
             tools/magisk.apk \
-            https://github.com/topjohnwu/Magisk/releases/latest/download/Magisk.apk
+            | grep \
+            libmagiskboot
+
+          echo "استخراج magiskboot..."
 
           unzip -p \
             tools/magisk.apk \
             lib/x86_64/libmagiskboot.so \
             > tools/magiskboot
 
-          chmod +x tools/magiskboot
+          chmod +x \
+            tools/magiskboot
 
-          tools/magiskboot --help >/dev/null
+          test -s \
+            tools/magiskboot
 
-          echo "تم تجهيز Magiskboot."
+          tools/magiskboot --help
+
+          echo "تم تجهيز Magiskboot بنجاح."
 
 
       - name: تحميل boot.img.zip من Release
