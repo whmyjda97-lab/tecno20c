@@ -128,7 +128,7 @@ jobs:
 
           echo "تم التحقق من وجود تكامل SUSFS داخل KernelSU-Next."
 
-          echo "لن يتم تطبيق patch تكامل KernelSU القديم مرة أخرى."
+          echo "لن يتم تطبيق patch تكامل KernelSU القديم."
 
 
       - name: تطبيق Patch الخاص بـ BG7n و SUSFS
@@ -277,6 +277,7 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
+            KCFLAGS="-Wno-error=frame-larger-than" \
             -j"$(nproc)" \
             Image \
             2>&1 | tee \
@@ -444,11 +445,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BG7n-SUSFS-KSU-build
+
           path: |
             boot-BG7n-SUSFS-KSU.img
             out/arch/arm64/boot/Image
             out/.config
             susfs-module-source.tar.gz
             patches-susfs-bg7n.patch
+
           if-no-files-found: error
+
           retention-days: 14
