@@ -312,7 +312,15 @@ jobs:
         run: |
           set -euxo pipefail
 
-          cp arch/arm64/configs/bg7n_stock_defconfig arch/arm64/configs/bg7n_defconfig
+          echo "Using stock config: ${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
+          sha256sum "${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
+
+          # The stock config lives in the repository root. Copy it into the
+          # kernel source tree before generating the final defconfig.
+          test -s "${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
+          cp "${GITHUB_WORKSPACE}/BG7n_stock_defconfig"             arch/arm64/configs/bg7n_stock_defconfig
+
+          cp arch/arm64/configs/bg7n_stock_defconfig             arch/arm64/configs/bg7n_defconfig
 
           cat >> arch/arm64/configs/bg7n_defconfig <<'CFG'
 
