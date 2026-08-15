@@ -18,12 +18,32 @@ jobs:
       - name: Install build dependencies
         run: |
           set -euo pipefail
+
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential ccache clang flex \
-            gcc-aarch64-linux-gnu git libelf-dev libssl-dev \
-            lld llvm python3 rsync unzip wget curl xz-utils zstd \
-            file device-tree-compiler zip
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            libelf-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            python3 \
+            rsync \
+            unzip \
+            wget \
+            curl \
+            xz-utils \
+            zstd \
+            file \
+            device-tree-compiler \
+            zip
 
       - name: Verify project files and hashes
         run: |
@@ -53,8 +73,21 @@ jobs:
       - name: Prepare workspace
         run: |
           set -euo pipefail
-          rm -rf kernel work out tools bootwork verification
-          mkdir -p work out tools bootwork verification
+
+          rm -rf \
+            kernel \
+            work \
+            out \
+            tools \
+            bootwork \
+            verification
+
+          mkdir -p \
+            work \
+            out \
+            tools \
+            bootwork \
+            verification
 
       - name: Fetch exact Android common kernel
         env:
@@ -63,6 +96,7 @@ jobs:
           set -euo pipefail
 
           git init kernel
+
           cd kernel
 
           git remote add origin \
@@ -84,8 +118,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          tar -xzf KernelSU-Next.tar.gz -C work
-          tar -xzf susfs4ksu-gki-android12-5.10.tar.gz -C work
+          tar -xzf \
+            KernelSU-Next.tar.gz \
+            -C work
+
+          tar -xzf \
+            susfs4ksu-gki-android12-5.10.tar.gz \
+            -C work
 
           KSU_DIR="$(
             find work \
@@ -108,11 +147,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -f "$KSU_DIR/kernel/setup.sh"
-          test -f "$KSU_DIR/kernel/Kconfig"
-          test -f "$KSU_DIR/kernel/Kbuild"
+          test -f \
+            "$KSU_DIR/kernel/setup.sh"
 
-          grep -q 'OWNER="pershoot"' \
+          test -f \
+            "$KSU_DIR/kernel/Kconfig"
+
+          test -f \
+            "$KSU_DIR/kernel/Kbuild"
+
+          grep -q \
+            'OWNER="pershoot"' \
             "$KSU_DIR/kernel/setup.sh"
 
           for symbol in \
@@ -150,13 +195,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 - "$GITHUB_WORKSPACE/patches-susfs-bg7n-legacy-reference.patch" \
+          python3 \
+            "$GITHUB_WORKSPACE/patches-susfs-bg7n-legacy-reference.patch" \
             "$GITHUB_WORKSPACE/50_add_susfs_in_gki-android12-5.10.patch" \
             "$GITHUB_WORKSPACE/verification/legacy-patch-report.txt" <<'PY'
           import re
           import sys
 
-          legacy, official, report = sys.argv[1:4]
+          legacy = sys.argv[1]
+          official = sys.argv[2]
+          report = sys.argv[3]
 
           with open(legacy, "r", encoding="utf-8", errors="replace") as f:
               lines = f.readlines()
@@ -178,34 +226,55 @@ jobs:
               off = f.read()
 
           official_paths = set(
-              re.findall(r'^diff --git a/(.*?) b/(.*?)$', off, re.M)
+              re.findall(
+                  r'^diff --git a/(.*?) b/(.*?)$',
+                  off,
+                  re.M
+              )
           )
 
           normalized = set()
+
           for p in paths:
               p = p.replace("pristine_bg7n/", "")
               p = p.replace("work_susfs/", "")
               normalized.add(p)
 
           overlap = sorted(
-              p for p in normalized
-              if any(p == a or p == b for a, b in official_paths)
+              p
+              for p in normalized
+              if any(
+                  p == a or p == b
+                  for a, b in official_paths
+              )
           )
 
           with open(report, "w", encoding="utf-8") as f:
-              f.write(f"legacy_non_orig_paths={len(normalized)}\n")
-              f.write(f"legacy_orig_entries={len(orig)}\n")
-              f.write(f"overlap_with_official_patch={len(overlap)}\n")
-              for p in overlap:
-                  f.write(f"overlap={p}\n")
+              f.write(
+                  f"legacy_non_orig_paths={len(normalized)}\n"
+              )
+              f.write(
+                  f"legacy_orig_entries={len(orig)}\n"
+              )
+              f.write(
+                  f"overlap_with_official_patch={len(overlap)}\n"
+              )
 
-          # The legacy patch is a combined snapshot, not an additional
-          # patch to apply on top of the official SUSFS patch.
+              for p in overlap:
+                  f.write(
+                      f"overlap={p}\n"
+                  )
+
           if len(overlap) < 20:
-              raise SystemExit("Unexpected legacy/official relationship")
+              raise SystemExit(
+                  "Unexpected legacy/official relationship"
+              )
 
           if len(orig) == 0:
-              raise SystemExit("Expected .orig entries not found")
+              raise SystemExit(
+                  "Expected .orig entries not found"
+              )
+          PY
 
       - name: Integrate bundled KernelSU-Next locally
         run: |
@@ -222,9 +291,11 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/kernel"
 
-          test -d KernelSU-Next/kernel
+          test -d \
+            KernelSU-Next/kernel
 
-          rm -f drivers/kernelsu
+          rm -f \
+            drivers/kernelsu
 
           ln -s \
             "../KernelSU-Next/kernel" \
@@ -233,19 +304,27 @@ jobs:
           grep -q \
             'obj-$(CONFIG_KSU) += kernelsu/' \
             drivers/Makefile \
-            || printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+            || printf \
+              '\nobj-$(CONFIG_KSU) += kernelsu/\n' \
+              >> drivers/Makefile
 
           if ! grep -qF \
             'source "drivers/kernelsu/Kconfig"' \
             drivers/Kconfig; then
+
             sed -i \
               '/endmenu/i\\source "drivers/kernelsu/Kconfig"' \
               drivers/Kconfig
           fi
 
-          test -L drivers/kernelsu
-          test -f KernelSU-Next/kernel/Kconfig
-          test -f KernelSU-Next/kernel/Kbuild
+          test -L \
+            drivers/kernelsu
+
+          test -f \
+            KernelSU-Next/kernel/Kconfig
+
+          test -f \
+            KernelSU-Next/kernel/Kbuild
 
       - name: Apply official SUSFS GKI 5.10 patch
         run: |
@@ -276,9 +355,14 @@ jobs:
             "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h" \
             kernel/include/linux/susfs_def.h
 
-          test -s kernel/fs/susfs.c
-          test -s kernel/include/linux/susfs.h
-          test -s kernel/include/linux/susfs_def.h
+          test -s \
+            kernel/fs/susfs.c
+
+          test -s \
+            kernel/include/linux/susfs.h
+
+          test -s \
+            kernel/include/linux/susfs_def.h
 
           grep -Fq \
             '#define SUSFS_VERSION "v2.2.0"' \
@@ -292,7 +376,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          chmod +x kernel/scripts/config
+          chmod +x \
+            kernel/scripts/config
 
           cp \
             stock.config \
@@ -301,20 +386,63 @@ jobs:
           C=kernel/scripts/config
           CFG=out/.config
 
-          "$C" --file "$CFG" --enable CONFIG_THREAD_INFO_IN_TASK
-          "$C" --file "$CFG" --enable CONFIG_KSU
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_PATH
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_KSTAT
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_ENABLE_LOG
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
-          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_MAP
-          "$C" --file "$CFG" --disable CONFIG_TRIM_UNUSED_KSYMS || true
-          "$C" --file "$CFG" --disable CONFIG_UNUSED_KSYMS || true
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_THREAD_INFO_IN_TASK
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_ENABLE_LOG
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
+
+          "$C" \
+            --file "$CFG" \
+            --enable CONFIG_KSU_SUSFS_SUS_MAP
+
+          "$C" \
+            --file "$CFG" \
+            --disable CONFIG_TRIM_UNUSED_KSYMS \
+            || true
+
+          "$C" \
+            --file "$CFG" \
+            --disable CONFIG_UNUSED_KSYMS \
+            || true
 
       - name: Resolve final Kconfig
         run: |
@@ -326,7 +454,8 @@ jobs:
             ARCH=arm64 \
             olddefconfig
 
-          test -s out/.config
+          test -s \
+            out/.config
 
       - name: Verify final Kconfig
         run: |
@@ -348,19 +477,28 @@ jobs:
             CONFIG_KSU_SUSFS_OPEN_REDIRECT \
             CONFIG_KSU_SUSFS_SUS_MAP; do
 
-            grep -qx "${symbol}=y" "$CFG" \
-              || {
+            grep -qx \
+              "${symbol}=y" \
+              "$CFG" || {
                 echo "Missing or disabled: $symbol"
                 exit 1
               }
+
           done
 
-          if grep -q '^CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y' "$CFG"; then
-            echo "Unexpected obsolete SUS_KSTAT_REDIRECT option enabled."
+          if grep -q \
+            '^CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y' \
+            "$CFG"; then
+
+            echo \
+              "Unexpected obsolete SUS_KSTAT_REDIRECT option enabled."
+
             exit 1
           fi
 
-          cp "$CFG" "$GITHUB_WORKSPACE/final.config"
+          cp \
+            "$CFG" \
+            "$GITHUB_WORKSPACE/final.config"
 
       - name: Build arm64 Image
         id: kernel_build
@@ -378,9 +516,11 @@ jobs:
             KCFLAGS="-Wno-error=frame-larger-than" \
             -j"$(nproc)" \
             Image \
-            2>&1 | tee "$GITHUB_WORKSPACE/kernel-build.log"
+            2>&1 | tee \
+            "$GITHUB_WORKSPACE/kernel-build.log"
 
           status=${PIPESTATUS[0]}
+
           exit "$status"
 
       - name: Verify kernel and SUSFS
@@ -388,24 +528,45 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -s out/arch/arm64/boot/Image
-          test -s out/vmlinux
-          test -s out/.config
-          test -s out/fs/susfs.o
+          test -s \
+            out/arch/arm64/boot/Image
 
-          grep -qx 'CONFIG_KSU=y' out/.config
-          grep -qx 'CONFIG_KSU_SUSFS=y' out/.config
+          test -s \
+            out/vmlinux
+
+          test -s \
+            out/.config
+
+          test -s \
+            out/fs/susfs.o
+
+          grep -qx \
+            'CONFIG_KSU=y' \
+            out/.config
+
+          grep -qx \
+            'CONFIG_KSU_SUSFS=y' \
+            out/.config
 
           echo "Kernel Image:"
-          file out/arch/arm64/boot/Image
-          ls -lh out/arch/arm64/boot/Image
+          file \
+            out/arch/arm64/boot/Image
+
+          ls -lh \
+            out/arch/arm64/boot/Image
 
           echo "SUSFS object:"
-          ls -lh out/fs/susfs.o
+          ls -lh \
+            out/fs/susfs.o
 
           echo "KernelSU/SUSFS configuration:"
-          grep '^CONFIG_KSU=' out/.config
-          grep '^CONFIG_KSU_SUSFS=' out/.config
+          grep \
+            '^CONFIG_KSU=' \
+            out/.config
+
+          grep \
+            '^CONFIG_KSU_SUSFS=' \
+            out/.config
 
           echo "Kernel and SUSFS verification passed."
 
@@ -420,9 +581,25 @@ jobs:
           set -euo pipefail
 
           MAGISK_URL="$(
-            curl -fsSL \
+            curl \
+              -fsSL \
               https://api.github.com/repos/topjohnwu/Magisk/releases/latest \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); u=[a["browser_download_url"] for a in d.get("assets",[]) if a["name"].startswith("Magisk-") and a["name"].endswith(".apk") and "debug" not in a["name"].lower()]; print(u[0] if u else "")'
+            | python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+
+          urls = [
+              a["browser_download_url"]
+              for a in data.get("assets", [])
+              if a["name"].startswith("Magisk-")
+              and a["name"].endswith(".apk")
+              and "debug" not in a["name"].lower()
+          ]
+
+          print(urls[0] if urls else "")
+          '
           )"
 
           test -n "$MAGISK_URL"
@@ -434,7 +611,8 @@ jobs:
             -o tools/Magisk.apk \
             "$MAGISK_URL"
 
-          test -s tools/Magisk.apk
+          test -s \
+            tools/Magisk.apk
 
       - name: Extract magiskboot
         run: |
@@ -445,8 +623,11 @@ jobs:
             lib/x86_64/libmagiskboot.so \
             > tools/magiskboot
 
-          test -s tools/magiskboot
-          chmod +x tools/magiskboot
+          test -s \
+            tools/magiskboot
+
+          chmod +x \
+            tools/magiskboot
 
       - name: Download stock boot image
         env:
@@ -454,8 +635,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          rm -rf bootwork
-          mkdir -p bootwork
+          rm -rf \
+            bootwork
+
+          mkdir -p \
+            bootwork
 
           gh release download \
             stock-boot \
@@ -473,9 +657,11 @@ jobs:
 
           test -n "$ZIP_FILE"
 
-          mkdir -p bootwork/extracted
+          mkdir -p \
+            bootwork/extracted
 
-          unzip -o \
+          unzip \
+            -o \
             "$ZIP_FILE" \
             -d bootwork/extracted
 
@@ -487,8 +673,20 @@ jobs:
           )"
 
           test -n "$BOOT_FILE"
-          cp "$BOOT_FILE" bootwork/boot.img
-          test -s bootwork/boot.img
+
+          cp \
+            "$BOOT_FILE" \
+            bootwork/boot.img
+
+          cp \
+            "$BOOT_FILE" \
+            bootwork/boot-original.img
+
+          test -s \
+            bootwork/boot.img
+
+          test -s \
+            bootwork/boot-original.img
 
       - name: Unpack stock boot
         run: |
@@ -499,7 +697,35 @@ jobs:
           "$GITHUB_WORKSPACE/tools/magiskboot" \
             unpack boot.img
 
-          test -s kernel
+          test -s \
+            kernel
+
+      - name: Verify original boot before modification
+        run: |
+          set -euo pipefail
+
+          test -s \
+            bootwork/boot-original.img
+
+          mkdir -p \
+            verification/original-boot
+
+          cp \
+            bootwork/boot-original.img \
+            verification/original-boot/boot.img
+
+          cd \
+            verification/original-boot
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            unpack boot.img
+
+          test -s \
+            kernel
+
+          sha256sum \
+            kernel \
+            > kernel.sha256
 
       - name: Replace kernel
         run: |
@@ -512,7 +738,7 @@ jobs:
           test -s \
             "$GITHUB_WORKSPACE/bootwork/kernel"
 
-      - name: Repack boot image
+      - name: Repack boot image for unlocked bootloader
         run: |
           set -euo pipefail
 
@@ -521,43 +747,216 @@ jobs:
           "$GITHUB_WORKSPACE/tools/magiskboot" \
             repack boot.img
 
-          test -s new-boot.img
+          test -s \
+            new-boot.img
 
           mv \
             new-boot.img \
-            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img"
 
           test -s \
-            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img"
 
-      - name: Verify final boot image
+      - name: Verify final boot kernel
         run: |
           set -euo pipefail
 
-          FINAL="$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+          FINAL="$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img"
           IMAGE="$GITHUB_WORKSPACE/out/arch/arm64/boot/Image"
 
-          test -s "$FINAL"
+          test -s \
+            "$FINAL"
 
-          rm -rf verification/final-boot
-          mkdir -p verification/final-boot
+          rm -rf \
+            verification/final-boot
 
-          cp "$FINAL" verification/final-boot/boot.img
+          mkdir -p \
+            verification/final-boot
 
-          cd verification/final-boot
+          cp \
+            "$FINAL" \
+            verification/final-boot/boot.img
+
+          cd \
+            verification/final-boot
 
           "$GITHUB_WORKSPACE/tools/magiskboot" \
             unpack boot.img
 
-          test -s kernel
+          test -s \
+            kernel
 
-          FINAL_SHA="$(sha256sum kernel | cut -d' ' -f1)"
-          IMAGE_SHA="$(sha256sum "$IMAGE" | cut -d' ' -f1)"
+          FINAL_KERNEL_SHA="$(
+            sha256sum kernel \
+            | cut -d' ' -f1
+          )"
 
-          test "$FINAL_SHA" = "$IMAGE_SHA"
+          BUILT_IMAGE_SHA="$(
+            sha256sum "$IMAGE" \
+            | cut -d' ' -f1
+          )"
 
-          echo "$FINAL_SHA" > kernel.sha256
-          echo "$IMAGE_SHA" > image.sha256
+          ORIGINAL_KERNEL_SHA="$(
+            sha256sum \
+              "$GITHUB_WORKSPACE/verification/original-boot/kernel" \
+            | cut -d' ' -f1
+          )"
+
+          echo \
+            "Original kernel SHA256: $ORIGINAL_KERNEL_SHA"
+
+          echo \
+            "Built Image SHA256: $BUILT_IMAGE_SHA"
+
+          echo \
+            "Final boot kernel SHA256: $FINAL_KERNEL_SHA"
+
+          test \
+            "$FINAL_KERNEL_SHA" = \
+            "$BUILT_IMAGE_SHA"
+
+          test \
+            "$ORIGINAL_KERNEL_SHA" != \
+            "$FINAL_KERNEL_SHA"
+
+          {
+            echo "original_kernel_sha256=$ORIGINAL_KERNEL_SHA"
+            echo "built_image_sha256=$BUILT_IMAGE_SHA"
+            echo "final_boot_kernel_sha256=$FINAL_KERNEL_SHA"
+            echo "final_boot_kernel_matches_built_image=true"
+            echo "original_and_final_kernel_differ=true"
+          } > \
+            "$GITHUB_WORKSPACE/verification/boot-kernel-verification.txt"
+
+      - name: Verify final boot AVB footer structure
+        run: |
+          set -euo pipefail
+
+          python3 \
+            "$GITHUB_WORKSPACE/verification/check_boot_avb.py" \
+            "$GITHUB_WORKSPACE/bootwork/boot-original.img" \
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img" \
+            "$GITHUB_WORKSPACE/verification/boot-avb-report.txt"
+
+      - name: Create boot AVB checker
+        run: |
+          set -euo pipefail
+
+          cat > \
+            "$GITHUB_WORKSPACE/verification/check_boot_avb.py" \
+            <<'PY'
+          import struct
+          import sys
+
+          if len(sys.argv) != 4:
+              raise SystemExit(
+                  "usage: check_boot_avb.py original final report"
+              )
+
+          original_path = sys.argv[1]
+          final_path = sys.argv[2]
+          report_path = sys.argv[3]
+
+          def u32(data, offset):
+              return struct.unpack_from(">I", data, offset)[0]
+
+          def u64(data, offset):
+              return struct.unpack_from(">Q", data, offset)[0]
+
+          def parse_footer(data):
+              magic = b"AVBf"
+              pos = data.rfind(magic)
+
+              if pos < 0:
+                  raise ValueError(
+                      "AVB footer not found"
+                  )
+
+              if pos + 64 > len(data):
+                  raise ValueError(
+                      "AVB footer is truncated"
+                  )
+
+              return {
+                  "offset": pos,
+                  "version_major": u32(data, pos + 4),
+                  "version_minor": u32(data, pos + 8),
+                  "original_image_size": u64(data, pos + 12),
+                  "vbmeta_offset": u64(data, pos + 20),
+                  "vbmeta_size": u64(data, pos + 28),
+              }
+
+          with open(original_path, "rb") as f:
+              original = f.read()
+
+          with open(final_path, "rb") as f:
+              final = f.read()
+
+          old = parse_footer(original)
+          new = parse_footer(final)
+
+          report = [
+              "bootloader_target=UNLOCKED",
+              "original_avb_footer_present=true",
+              "final_avb_footer_present=true",
+              f"original_footer_offset={old['offset']}",
+              f"final_footer_offset={new['offset']}",
+              f"original_vbmeta_size={old['vbmeta_size']}",
+              f"final_vbmeta_size={new['vbmeta_size']}",
+              f"original_image_size={old['original_image_size']}",
+              f"final_image_size={new['original_image_size']}",
+              f"avb_version_original={old['version_major']}.{old['version_minor']}",
+              f"avb_version_final={new['version_major']}.{new['version_minor']}",
+          ]
+
+          if old["vbmeta_size"] != new["vbmeta_size"]:
+              raise SystemExit(
+                  "Embedded AVB vbmeta size changed unexpectedly"
+              )
+
+          if (
+              old["version_major"],
+              old["version_minor"],
+          ) != (
+              new["version_major"],
+              new["version_minor"],
+          ):
+              raise SystemExit(
+                  "AVB footer version changed unexpectedly"
+              )
+
+          report.append(
+              "embedded_vbmeta_structure_preserved=true"
+          )
+
+          report.append(
+              "warning=boot content changed, so original AVB hash "
+              "descriptors must not be assumed valid"
+          )
+
+          with open(
+              report_path,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              f.write(
+                  "\n".join(report)
+                  + "\n"
+              )
+          PY
+
+      - name: Re-run final boot AVB check
+        run: |
+          set -euo pipefail
+
+          python3 \
+            "$GITHUB_WORKSPACE/verification/check_boot_avb.py" \
+            "$GITHUB_WORKSPACE/bootwork/boot-original.img" \
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img" \
+            "$GITHUB_WORKSPACE/verification/boot-avb-report.txt"
+
+          cat \
+            "$GITHUB_WORKSPACE/verification/boot-avb-report.txt"
 
       - name: Build SUSFS userspace module
         run: |
@@ -574,12 +973,15 @@ jobs:
             -o "$NDK_ZIP" \
             "$NDK_URL"
 
-          echo "$NDK_SHA1  $NDK_ZIP" \
+          echo \
+            "$NDK_SHA1  $NDK_ZIP" \
             | sha1sum -c -
 
-          mkdir -p ndk
+          mkdir -p \
+            ndk
 
-          unzip -q \
+          unzip \
+            -q \
             "$NDK_ZIP" \
             -d ndk
 
@@ -591,12 +993,17 @@ jobs:
               -print -quit
           )"
 
-          test -d "$NDK_DIR"
+          test -d \
+            "$NDK_DIR"
 
-          export ANDROID_NDK_ROOT="$GITHUB_WORKSPACE/$NDK_DIR"
-          export PATH="$ANDROID_NDK_ROOT:$PATH"
+          export \
+            ANDROID_NDK_ROOT="$GITHUB_WORKSPACE/$NDK_DIR"
 
-          cd "$SUSFS_DIR"
+          export \
+            PATH="$ANDROID_NDK_ROOT:$PATH"
+
+          cd \
+            "$SUSFS_DIR"
 
           ./build_ksu_susfs_tool.sh
 
@@ -607,7 +1014,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          cd "$SUSFS_DIR"
+          cd \
+            "$SUSFS_DIR"
 
           ./build_ksu_module.sh
 
@@ -618,7 +1026,31 @@ jobs:
             ksu_module_susfs.zip \
             "$GITHUB_WORKSPACE/susfs4ksu-module-v2.2.0.zip"
 
-      - name: Generate manifest
+      - name: Generate unlocked boot manifest
+        run: |
+          set -euo pipefail
+
+          FINAL="$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img"
+          IMAGE="$GITHUB_WORKSPACE/out/arch/arm64/boot/Image"
+
+          {
+            echo "bootloader_target=UNLOCKED"
+            echo "boot_image=boot-BG7n-SUSFS-KSU-unlocked.img"
+            echo "vendor_boot_modified=false"
+            echo "dtbo_modified=false"
+            echo "vbmeta_modified=false"
+            echo "vbmeta_system_modified=false"
+            echo "vbmeta_vendor_modified=false"
+            echo "built_kernel_sha256=$(sha256sum "$IMAGE" | cut -d' ' -f1)"
+            echo "final_boot_sha256=$(sha256sum "$FINAL" | cut -d' ' -f1)"
+            echo "final_boot_kernel_sha256=$(sha256sum verification/final-boot/kernel | cut -d' ' -f1)"
+          } > \
+            unlocked-boot-manifest.txt
+
+          test -s \
+            unlocked-boot-manifest.txt
+
+      - name: Generate global build manifest
         run: |
           set -euo pipefail
 
@@ -630,11 +1062,13 @@ jobs:
             echo "official_susfs_patch_sha256=$(sha256sum 50_add_susfs_in_gki-android12-5.10.patch | cut -d' ' -f1)"
             echo "legacy_patch_sha256=$(sha256sum patches-susfs-bg7n-legacy-reference.patch | cut -d' ' -f1)"
             echo "kernel_image_sha256=$(sha256sum out/arch/arm64/boot/Image | cut -d' ' -f1)"
-            echo "final_boot_sha256=$(sha256sum boot-BG7n-SUSFS-KSU.img | cut -d' ' -f1)"
+            echo "final_boot_sha256=$(sha256sum boot-BG7n-SUSFS-KSU-unlocked.img | cut -d' ' -f1)"
             echo "final_config_sha256=$(sha256sum final.config | cut -d' ' -f1)"
-          } > BUILD_MANIFEST.txt
+          } > \
+            BUILD_MANIFEST.txt
 
-          test -s BUILD_MANIFEST.txt
+          test -s \
+            BUILD_MANIFEST.txt
 
       - name: Upload kernel build log
         if: always()
@@ -649,35 +1083,39 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verification-${{ github.run_number }}
+          name: verification-unlocked-${{ github.run_number }}
           path: |
             verification/
             final.config
             BUILD_MANIFEST.txt
+            unlocked-boot-manifest.txt
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload final build
+      - name: Upload final unlocked boot build
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: BG7n-SUSFS-KSU-full-${{ github.run_number }}
+          name: BG7n-SUSFS-KSU-unlocked-${{ github.run_number }}
           path: |
-            boot-BG7n-SUSFS-KSU.img
+            boot-BG7n-SUSFS-KSU-unlocked.img
             out/arch/arm64/boot/Image
             final.config
             susfs4ksu-module-v2.2.0.zip
             BUILD_MANIFEST.txt
+            unlocked-boot-manifest.txt
+            verification/boot-kernel-verification.txt
+            verification/boot-avb-report.txt
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload boot image
+      - name: Upload boot image separately
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: boot-BG7n-SUSFS-KSU-${{ github.run_number }}
-          path: boot-BG7n-SUSFS-KSU.img
+          name: boot-BG7n-SUSFS-KSU-unlocked-${{ github.run_number }}
+          path: boot-BG7n-SUSFS-KSU-unlocked.img
           if-no-files-found: error
           retention-days: 14
