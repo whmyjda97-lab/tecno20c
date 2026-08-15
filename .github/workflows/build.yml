@@ -119,6 +119,11 @@ jobs:
             zip \
             android-sdk-libsparse-utils
 
+          echo "=== HOST ARCHITECTURE ==="
+          uname -m
+          dpkg --print-architecture
+
+          echo "=== TOOLCHAIN ==="
           clang --version
           ld.lld --version
           llvm-ar --version
@@ -503,12 +508,14 @@ jobs:
 
           (
             cd KernelSU
+
             patch --batch --forward -p1 \
               < 10_enable_susfs_for_ksu.patch
           )
 
           (
             cd common
+
             patch --batch --forward -p1 \
               < 50_add_susfs_in_gki-android12-5.10.patch
           )
@@ -633,20 +640,6 @@ jobs:
           rm -rf "${CONFIG_OUT}"
           mkdir -p "${CONFIG_OUT}"
 
-          # ----------------------------------------------------------
-          # IMPORTANT:
-          #
-          # The stock/GKI configuration may contain:
-          #
-          # CONFIG_TRIM_UNUSED_KSYMS=y
-          # CONFIG_UNUSED_KSYMS_WHITELIST="abi_symbol_list.raw"
-          #
-          # This is exactly what caused the error in the screenshot.
-          #
-          # We intentionally remove these options for the custom
-          # KernelSU/SUSFS kernel.
-          # ----------------------------------------------------------
-
           cat > "${CONFIG_OUT}/protected.symbols" <<'EOF'
           CONFIG_LTO_NONE
           CONFIG_LTO_CLANG
@@ -742,27 +735,15 @@ jobs:
 
           test -s "${CONFIG_OUT}/.config"
 
-          # ----------------------------------------------------------
-          # Explicitly disable GKI symbol trimming.
-          # ----------------------------------------------------------
-
           scripts/config \
             --file "${CONFIG_OUT}/.config" \
             -d TRIM_UNUSED_KSYMS \
             -d UNUSED_KSYMS_WHITELIST
 
-          # ----------------------------------------------------------
-          # Enable KernelSU / SUSFS.
-          # ----------------------------------------------------------
-
           scripts/config \
             --file "${CONFIG_OUT}/.config" \
             -e KSU \
             -e KSU_SUSFS
-
-          # ----------------------------------------------------------
-          # Resolve configuration.
-          # ----------------------------------------------------------
 
           make \
             LLVM=1 \
@@ -772,10 +753,6 @@ jobs:
             ARCH=arm64 \
             O="${CONFIG_OUT}" \
             olddefconfig
-
-          # ----------------------------------------------------------
-          # Verify the actual resolved config.
-          # ----------------------------------------------------------
 
           echo
           echo "=== RESOLVED CONFIG ==="
@@ -804,10 +781,6 @@ jobs:
             '^CONFIG_KALLSYMS=y$' \
             "${CONFIG_OUT}/.config"
 
-          # ----------------------------------------------------------
-          # CRITICAL FIX VERIFICATION
-          # ----------------------------------------------------------
-
           if grep -q \
             '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
             "${CONFIG_OUT}/.config"
@@ -826,10 +799,6 @@ jobs:
 
           echo
           echo "=== KSU/SUSFS CONFIGURATION OK ==="
-
-          # ----------------------------------------------------------
-          # Save minimal defconfig.
-          # ----------------------------------------------------------
 
           make \
             LLVM=1 \
@@ -853,10 +822,6 @@ jobs:
           grep -E \
             '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST)=' \
             arch/arm64/configs/bg7n_defconfig || true
-
-          # ----------------------------------------------------------
-          # Re-expand final defconfig.
-          # ----------------------------------------------------------
 
           rm -f "${CONFIG_OUT}/.config"
 
@@ -949,22 +914,16 @@ jobs:
 
           # ----------------------------------------------------------
           # CUSTOM KSU/SUSFS BUILD
-          #
-          # Do NOT use GKI KMI trimming.
-          # This prevents build.sh from creating/using
-          # abi_symbol_list.raw as CONFIG_UNUSED_KSYMS_WHITELIST.
           # ----------------------------------------------------------
 
           KMI_ENFORCED=0
           KMI_SYMBOL_LIST_STRICT_MODE=0
           TRIM_NONLISTED_KMI=0
 
-          # Keep the ABI symbol list available for metadata, but do not
-          # use it for symbol trimming.
           KMI_SYMBOL_LIST=android/abi_gki_aarch64
 
           # ----------------------------------------------------------
-          # Force the actual kernel config after defconfig.
+          # Force final KernelSU/SUSFS configuration.
           # ----------------------------------------------------------
 
           POST_DEFCONFIG_CMDS="update_bg7n_config"
@@ -979,6 +938,7 @@ jobs:
 
               (
                   cd ${OUT_DIR}
+
                   make O=${OUT_DIR} \
                       ${TOOL_ARGS} \
                       ${MAKE_ARGS} \
@@ -1400,17 +1360,35 @@ jobs:
 
           mkdir -p \
             work/boot \
-            artifact/boot
+            artifact/boot \
+            artifact/reports
 
           cp \
             stock/boot.img \
             work/boot/boot.img
 
+          # --------------------------------------------------------
+          # IMPORTANT:
+          #
+          # GitHub Actions ubuntu-22.04 runner is x86_64.
+          #
+          # DO NOT extract:
+          #   lib/arm64-v8a/libmagiskboot.so
+          #
+          # That binary is ARM64 and cannot execute on the runner.
+          #
+          # We intentionally extract:
+          #   lib/x86_64/libmagiskboot.so
+          # --------------------------------------------------------
+
           MAGISK_API="https://api.github.com/repos/topjohnwu/Magisk/releases/latest"
+
+          echo "=== Fetching latest Magisk release metadata ==="
 
           MAGISK_URL="$(
             curl -fsSL \
               -H "Accept: application/vnd.github+json" \
+              -H "User-Agent: github-actions-bg7n-builder" \
               "${MAGISK_API}" |
             jq -r '
               .assets[]
@@ -1423,24 +1401,112 @@ jobs:
 
           test -n "${MAGISK_URL}"
 
+          echo "Magisk APK:"
+          echo "${MAGISK_URL}"
+
           curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
             "${MAGISK_URL}" \
             -o magisk.apk
 
+          test -s magisk.apk
+
+          echo
+          echo "=== Magisk APK information ==="
+
+          unzip -l magisk.apk |
+            grep -E \
+              'lib/(arm64-v8a|armeabi-v7a|x86|x86_64)/libmagiskboot\.so' \
+              || true
+
+          # --------------------------------------------------------
+          # Verify x86_64 magiskboot exists.
+          # --------------------------------------------------------
+
+          if ! unzip -Z1 magisk.apk |
+              grep -qx 'lib/x86_64/libmagiskboot.so'
+          then
+            echo "::error::Magisk APK does not contain x86_64 magiskboot."
+            echo "::error::Cannot execute ARM64 magiskboot on x86_64 runner."
+            exit 1
+          fi
+
+          # --------------------------------------------------------
+          # Extract HOST x86_64 magiskboot.
+          # --------------------------------------------------------
+
+          rm -f \
+            work/magiskboot \
+            work/libmagiskboot.so
+
           unzip -j -o \
             magisk.apk \
-            'lib/arm64-v8a/libmagiskboot.so' \
+            'lib/x86_64/libmagiskboot.so' \
             -d work
+
+          test -s \
+            work/libmagiskboot.so
 
           mv \
             work/libmagiskboot.so \
             work/magiskboot
 
-          chmod +x \
+          chmod 0755 \
             work/magiskboot
+
+          # --------------------------------------------------------
+          # CRITICAL ARCHITECTURE CHECK
+          # --------------------------------------------------------
+
+          echo
+          echo "=== Runner architecture ==="
+
+          uname -m
+          dpkg --print-architecture
+
+          echo
+          echo "=== magiskboot file type ==="
+
+          file \
+            work/magiskboot
+
+          MAGISK_ARCH="$(
+            file work/magiskboot
+          )"
+
+          echo "${MAGISK_ARCH}" \
+            | grep -E \
+              'ELF 64-bit.*x86-64|x86-64'
+          
+          # --------------------------------------------------------
+          # Verify the binary can actually execute.
+          # --------------------------------------------------------
+
+          echo
+          echo "=== magiskboot version/test ==="
+
+          work/magiskboot --help \
+            > artifact/reports/magiskboot_help.txt \
+            2>&1 \
+            || true
+
+          if ! work/magiskboot --help \
+              >/dev/null 2>&1
+          then
+            echo "::error::x86_64 magiskboot cannot execute."
+            exit 1
+          fi
+
+          # --------------------------------------------------------
+          # Unpack stock boot.
+          # --------------------------------------------------------
 
           (
             cd work/boot
+
+            echo
+            echo "=== Unpacking stock boot.img ==="
 
             ../magiskboot unpack boot.img
 
@@ -1449,17 +1515,42 @@ jobs:
             test -s \
               ../../artifact/kernel/Image
 
+            echo
+            echo "=== Original boot kernel ==="
+
+            file kernel
+
+            echo
+            echo "=== Replacing boot kernel ==="
+
             cp \
               ../../artifact/kernel/Image \
               kernel
+
+            test -s kernel
+
+            echo
+            echo "=== New boot kernel ==="
+
+            file kernel
+
+            echo
+            echo "=== Repacking boot.img ==="
 
             ../magiskboot repack boot.img
 
             test -s new-boot.img
           )
 
+          # --------------------------------------------------------
+          # Save generated boot.
+          # --------------------------------------------------------
+
           cp \
             work/boot/new-boot.img \
+            artifact/boot/BG7n-KSU-SUSFS-boot.img
+
+          test -s \
             artifact/boot/BG7n-KSU-SUSFS-boot.img
 
           file \
@@ -1468,6 +1559,9 @@ jobs:
           sha256sum \
             artifact/boot/BG7n-KSU-SUSFS-boot.img \
             | tee artifact/reports/generated_boot.sha256
+
+          echo
+          echo "=== BOOT REPACK SUCCESS ==="
 
       # ============================================================
       # BUILD INFO
@@ -1517,6 +1611,9 @@ jobs:
 
           CONFIG_TRIM_UNUSED_KSYMS=n
           CONFIG_UNUSED_KSYMS_WHITELIST=unset
+
+          MAGISK_HOST_ARCH=x86_64
+          MAGISK_BOOT_VARIANT=lib/x86_64/libmagiskboot.so
           EOF
 
           cp \
@@ -1618,15 +1715,25 @@ jobs:
             CONFIG_TRIM_UNUSED_KSYMS=n
             CONFIG_UNUSED_KSYMS_WHITELIST=unset
 
+          Magisk boot repacker:
+            HOST=x86_64
+            VARIANT=lib/x86_64/libmagiskboot.so
+
           IMPORTANT:
             This is a custom KernelSU/SUSFS kernel.
             It is NOT an unmodified certified GKI kernel.
 
+            The stock boot.img must be kept as a recovery backup
+            before flashing the modified boot image.
+
             Check:
               reports/kernel_verification.txt
 
-            Keep the original stock boot.img
-            before flashing the modified boot image.
+            Check:
+              reports/generated_boot.sha256
+
+            Check:
+              reports/stock_boot.sha256
           EOF
 
           (
@@ -1636,6 +1743,9 @@ jobs:
               ../../BG7n_GKI_r3_KSU_SUSFS_artifacts.zip \
               .
           )
+
+          test -s \
+            BG7n_GKI_r3_KSU_SUSFS_artifacts.zip
 
       # ============================================================
       # UPLOAD
