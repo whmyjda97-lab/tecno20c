@@ -188,10 +188,17 @@ jobs:
           test -d common
           test -f common/Makefile
 
-          # Pin only kernel/common to the exact r3 release tag.
-          git -C common fetch --no-tags origin             "refs/tags/${GKI_COMMON_TAG}:refs/tags/${GKI_COMMON_TAG}"
+          echo "=== manifest-managed common remotes ==="
+          git -C common remote -v || true
 
-          git -C common checkout --detach "${GKI_COMMON_TAG}"
+          # Pin only kernel/common to the exact r3 release tag.
+          # repo's manifest-managed checkout may not expose a usable "origin"
+          # remote, so fetch the tag directly from kernel/common.
+          git -C common fetch --no-tags \
+            https://android.googlesource.com/kernel/common.git \
+            "refs/tags/${GKI_COMMON_TAG}:refs/tags/${GKI_COMMON_TAG}"
+
+          git -C common checkout --detach "refs/tags/${GKI_COMMON_TAG}"
 
           COMMON_COMMIT="$(git -C common rev-parse HEAD)"
           echo "COMMON_COMMIT=${COMMON_COMMIT}"
