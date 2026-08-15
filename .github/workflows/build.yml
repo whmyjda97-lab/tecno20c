@@ -195,10 +195,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 \
+          python3 - \
             "$GITHUB_WORKSPACE/patches-susfs-bg7n-legacy-reference.patch" \
             "$GITHUB_WORKSPACE/50_add_susfs_in_gki-android12-5.10.patch" \
-            "$GITHUB_WORKSPACE/verification/legacy-patch-report.txt" <<'PY'
+            "$GITHUB_WORKSPACE/verification/legacy-patch-report.txt" \
+            <<'PY'
           import re
           import sys
 
@@ -206,7 +207,12 @@ jobs:
           official = sys.argv[2]
           report = sys.argv[3]
 
-          with open(legacy, "r", encoding="utf-8", errors="replace") as f:
+          with open(
+              legacy,
+              "r",
+              encoding="utf-8",
+              errors="replace"
+          ) as f:
               lines = f.readlines()
 
           paths = []
@@ -215,20 +221,27 @@ jobs:
           for line in lines:
               if line.startswith("--- ") or line.startswith("+++ "):
                   parts = line.split()
+
                   if len(parts) >= 2:
                       p = parts[1]
+
                       if p.endswith(".orig"):
                           orig.append(p)
                       else:
                           paths.append(p)
 
-          with open(official, "r", encoding="utf-8", errors="replace") as f:
-              off = f.read()
+          with open(
+              official,
+              "r",
+              encoding="utf-8",
+              errors="replace"
+          ) as f:
+              official_text = f.read()
 
           official_paths = set(
               re.findall(
                   r'^diff --git a/(.*?) b/(.*?)$',
-                  off,
+                  official_text,
                   re.M
               )
           )
@@ -238,6 +251,13 @@ jobs:
           for p in paths:
               p = p.replace("pristine_bg7n/", "")
               p = p.replace("work_susfs/", "")
+
+              if p.startswith("a/"):
+                  p = p[2:]
+
+              if p.startswith("b/"):
+                  p = p[2:]
+
               normalized.add(p)
 
           overlap = sorted(
@@ -249,13 +269,19 @@ jobs:
               )
           )
 
-          with open(report, "w", encoding="utf-8") as f:
+          with open(
+              report,
+              "w",
+              encoding="utf-8"
+          ) as f:
               f.write(
                   f"legacy_non_orig_paths={len(normalized)}\n"
               )
+
               f.write(
                   f"legacy_orig_entries={len(orig)}\n"
               )
+
               f.write(
                   f"overlap_with_official_patch={len(overlap)}\n"
               )
@@ -274,6 +300,11 @@ jobs:
               raise SystemExit(
                   "Expected .orig entries not found"
               )
+
+          print("Legacy patch relationship verified.")
+          print(f"Non-orig paths: {len(normalized)}")
+          print(f"Orig entries: {len(orig)}")
+          print(f"Official overlap: {len(overlap)}")
           PY
 
       - name: Integrate bundled KernelSU-Next locally
@@ -707,6 +738,9 @@ jobs:
           test -s \
             bootwork/boot-original.img
 
+          rm -rf \
+            verification/original-boot
+
           mkdir -p \
             verification/original-boot
 
@@ -828,16 +862,6 @@ jobs:
           } > \
             "$GITHUB_WORKSPACE/verification/boot-kernel-verification.txt"
 
-      - name: Verify final boot AVB footer structure
-        run: |
-          set -euo pipefail
-
-          python3 \
-            "$GITHUB_WORKSPACE/verification/check_boot_avb.py" \
-            "$GITHUB_WORKSPACE/bootwork/boot-original.img" \
-            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU-unlocked.img" \
-            "$GITHUB_WORKSPACE/verification/boot-avb-report.txt"
-
       - name: Create boot AVB checker
         run: |
           set -euo pipefail
@@ -865,12 +889,25 @@ jobs:
 
           def parse_footer(data):
               magic = b"AVBf"
-              pos = data.rfind(magic)
 
-              if pos < 0:
+              positions = []
+              start = 0
+
+              while True:
+                  pos = data.find(magic, start)
+
+                  if pos < 0:
+                      break
+
+                  positions.append(pos)
+                  start = pos + 1
+
+              if not positions:
                   raise ValueError(
                       "AVB footer not found"
                   )
+
+              pos = positions[-1]
 
               if pos + 64 > len(data):
                   raise ValueError(
@@ -881,15 +918,30 @@ jobs:
                   "offset": pos,
                   "version_major": u32(data, pos + 4),
                   "version_minor": u32(data, pos + 8),
-                  "original_image_size": u64(data, pos + 12),
-                  "vbmeta_offset": u64(data, pos + 20),
-                  "vbmeta_size": u64(data, pos + 28),
+                  "original_image_size": u64(
+                      data,
+                      pos + 12
+                  ),
+                  "vbmeta_offset": u64(
+                      data,
+                      pos + 20
+                  ),
+                  "vbmeta_size": u64(
+                      data,
+                      pos + 28
+                  ),
               }
 
-          with open(original_path, "rb") as f:
+          with open(
+              original_path,
+              "rb"
+          ) as f:
               original = f.read()
 
-          with open(final_path, "rb") as f:
+          with open(
+              final_path,
+              "rb"
+          ) as f:
               final = f.read()
 
           old = parse_footer(original)
@@ -909,18 +961,18 @@ jobs:
               f"avb_version_final={new['version_major']}.{new['version_minor']}",
           ]
 
-          if old["vbmeta_size"] != new["vbmeta_size"]:
+          if \
+              old["vbmeta_size"] != \
+              new["vbmeta_size"]:
+
               raise SystemExit(
                   "Embedded AVB vbmeta size changed unexpectedly"
               )
 
-          if (
-              old["version_major"],
-              old["version_minor"],
-          ) != (
-              new["version_major"],
-              new["version_minor"],
-          ):
+          if \
+              (old["version_major"], old["version_minor"]) != \
+              (new["version_major"], new["version_minor"]):
+
               raise SystemExit(
                   "AVB footer version changed unexpectedly"
               )
@@ -930,7 +982,7 @@ jobs:
           )
 
           report.append(
-              "warning=boot content changed, so original AVB hash "
+              "warning=boot content changed; original AVB hash "
               "descriptors must not be assumed valid"
           )
 
@@ -945,7 +997,10 @@ jobs:
               )
           PY
 
-      - name: Re-run final boot AVB check
+          test -s \
+            "$GITHUB_WORKSPACE/verification/check_boot_avb.py"
+
+      - name: Verify final boot AVB footer structure
         run: |
           set -euo pipefail
 
