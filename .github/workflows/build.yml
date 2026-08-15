@@ -789,10 +789,6 @@ jobs:
           mkdir -p \
             "${CONFIG_OUT}"
 
-          # ----------------------------------------------------------
-          # Protected symbols
-          # ----------------------------------------------------------
-
           cat > \
             "${CONFIG_OUT}/protected.symbols" \
             <<'EOF'
@@ -820,10 +816,6 @@ jobs:
           CONFIG_TRIM_UNUSED_KSYMS
           CONFIG_UNUSED_KSYMS_WHITELIST
           EOF
-
-          # ----------------------------------------------------------
-          # Filter stock config
-          # ----------------------------------------------------------
 
           python3 - \
             "${CONFIG_OUT}/protected.symbols" \
@@ -889,10 +881,6 @@ jobs:
           )
           PY
 
-          # ----------------------------------------------------------
-          # Merge GKI base + device-specific config
-          # ----------------------------------------------------------
-
           cp \
             "${GKI_BASE_CONFIG}" \
             "${CONFIG_OUT}/gki_base.config"
@@ -907,27 +895,15 @@ jobs:
           test -s \
             "${CONFIG_OUT}/.config"
 
-          # ----------------------------------------------------------
-          # Remove GKI unused-symbol trimming
-          # ----------------------------------------------------------
-
           scripts/config \
             --file "${CONFIG_OUT}/.config" \
             -d TRIM_UNUSED_KSYMS \
             -d UNUSED_KSYMS_WHITELIST
 
-          # ----------------------------------------------------------
-          # Enable KSU + SUSFS
-          # ----------------------------------------------------------
-
           scripts/config \
             --file "${CONFIG_OUT}/.config" \
             -e KSU \
             -e KSU_SUSFS
-
-          # ----------------------------------------------------------
-          # Resolve Kconfig
-          # ----------------------------------------------------------
 
           make \
             LLVM=1 \
@@ -946,10 +922,6 @@ jobs:
             "${CONFIG_OUT}/.config" \
             || true
 
-          # ----------------------------------------------------------
-          # Required symbols
-          # ----------------------------------------------------------
-
           for sym in \
             CONFIG_KSU \
             CONFIG_KSU_SUSFS \
@@ -965,10 +937,6 @@ jobs:
                 exit 1
             }
           done
-
-          # ----------------------------------------------------------
-          # Symbol trimming must stay disabled
-          # ----------------------------------------------------------
 
           if grep -q \
             '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
@@ -989,10 +957,6 @@ jobs:
           echo
           echo "=== KSU/SUSFS CONFIGURATION OK ==="
 
-          # ----------------------------------------------------------
-          # Generate canonical minimal defconfig
-          # ----------------------------------------------------------
-
           make \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -1008,10 +972,6 @@ jobs:
 
           test -s \
             arch/arm64/configs/bg7n_defconfig
-
-          # ----------------------------------------------------------
-          # Re-expand the defconfig
-          # ----------------------------------------------------------
 
           rm -f \
             "${CONFIG_OUT}/.config"
@@ -1555,7 +1515,8 @@ jobs:
             ../../artifact/susfs/susfs4ksu-module
 
           if [ -f \
-            ksu_module_susfs.zip ]
+            ksu_module_susfs.zip
+          ]
           then
 
             cp \
@@ -1622,11 +1583,6 @@ jobs:
             grep -E \
               'lib/(arm64-v8a|armeabi-v7a|x86|x86_64)/libmagiskboot\.so'
 
-          # --------------------------------------------------------
-          # Ubuntu runner is x86_64.
-          # Extract x86_64 magiskboot, NOT ARM64.
-          # --------------------------------------------------------
-
           if ! unzip -Z1 \
               magisk.apk |
               grep -qx \
@@ -1672,12 +1628,6 @@ jobs:
           file work/magiskboot |
             grep -E \
               'ELF 64-bit.*x86-64|x86-64'
-
-          # --------------------------------------------------------
-          # IMPORTANT:
-          # Do NOT use "--help" as a required execution test.
-          # We test the actual unpack action in step 23.
-          # --------------------------------------------------------
 
           sha256sum \
             work/magiskboot \
@@ -1758,10 +1708,6 @@ jobs:
               'Linux version' \
               || true
 
-          # --------------------------------------------------------
-          # Confirm expected Linux version.
-          # --------------------------------------------------------
-
           if ! strings \
               "${WORK_BOOT}/kernel" |
               grep -q \
@@ -1784,10 +1730,6 @@ jobs:
           echo
           echo "Stock boot matches Linux ${GKI_VERSION}."
 
-          # --------------------------------------------------------
-          # Replace only the kernel.
-          # --------------------------------------------------------
-
           cp \
             "${BUILT_KERNEL}" \
             "${WORK_BOOT}/kernel"
@@ -1803,10 +1745,6 @@ jobs:
 
           sha256sum \
             "${WORK_BOOT}/kernel"
-
-          # --------------------------------------------------------
-          # Repack.
-          # --------------------------------------------------------
 
           echo
           echo "=== REPACK STOCK BOOT ==="
@@ -1848,23 +1786,6 @@ jobs:
 
       # ============================================================
       # 24 - VERIFY GENERATED BOOT
-      #
-      # IMPORTANT FIX:
-      #
-      # The previous version used:
-      #
-      #   cd verify/generated
-      #   ../work/magiskboot ...
-      #
-      # which pointed to:
-      #
-      #   verify/work/magiskboot
-      #
-      # instead of:
-      #
-      #   work/magiskboot
-      #
-      # This version uses absolute paths.
       # ============================================================
 
       - name: 24 - Verify generated boot image
@@ -1876,10 +1797,6 @@ jobs:
           BUILT_KERNEL="${GITHUB_WORKSPACE}/artifact/kernel/Image"
           MAGISKBOOT="${GITHUB_WORKSPACE}/work/magiskboot"
           VERIFY_DIR="${GITHUB_WORKSPACE}/verify/generated"
-
-          # --------------------------------------------------------
-          # Basic validation
-          # --------------------------------------------------------
 
           test -s \
             "${GENERATED_BOOT}"
@@ -1900,10 +1817,6 @@ jobs:
             "${GENERATED_BOOT}" \
             "${VERIFY_DIR}/boot.img"
 
-          # --------------------------------------------------------
-          # Absolute-path architecture check
-          # --------------------------------------------------------
-
           echo "=== MAGISKBOOT ==="
 
           file \
@@ -1912,10 +1825,6 @@ jobs:
           file "${MAGISKBOOT}" |
             grep -E \
               'ELF 64-bit.*x86-64|x86-64'
-
-          # --------------------------------------------------------
-          # REAL MAGISKBOOT EXECUTION
-          # --------------------------------------------------------
 
           echo
           echo "=== UNPACK GENERATED BOOT ==="
@@ -1940,11 +1849,6 @@ jobs:
           sha256sum \
             "${VERIFY_DIR}/kernel"
 
-          # --------------------------------------------------------
-          # Compare kernel inside generated boot with the kernel
-          # built by the workflow.
-          # --------------------------------------------------------
-
           BUILT_SHA="$(
             sha256sum \
               "${BUILT_KERNEL}" |
@@ -1968,10 +1872,6 @@ jobs:
           test \
             "${BUILT_SHA}" = \
             "${EXTRACTED_SHA}"
-
-          # --------------------------------------------------------
-          # Store verification hash
-          # --------------------------------------------------------
 
           sha256sum \
             "${GENERATED_BOOT}" |
@@ -2071,13 +1971,68 @@ jobs:
             > artifact/SHA256SUMS.txt
 
       # ============================================================
-      # 26 - PACKAGE
+      # 26 - PACKAGE ARTIFACTS
       # ============================================================
 
       - name: 26 - Package artifacts
         shell: bash
         run: |
           set -euxo pipefail
+
+          # --------------------------------------------------------
+          # IMPORTANT:
+          # Every GitHub Actions step has its own shell.
+          # Therefore KSU_ACTUAL_COMMIT from step 25 is NOT available
+          # here. Recalculate both commits explicitly.
+          # --------------------------------------------------------
+
+          KSU_ACTUAL_COMMIT="$(
+            git -C gki/KernelSU \
+              rev-parse HEAD
+          )"
+
+          SUSFS_COMMIT="$(
+            git -C gki/susfs \
+              rev-parse HEAD
+          )"
+
+          COMMON_COMMIT="$(
+            git -C gki/common \
+              rev-parse HEAD
+          )"
+
+          echo "=== PACKAGE COMMITS ==="
+
+          echo "KernelSU:"
+          echo "${KSU_ACTUAL_COMMIT}"
+
+          echo
+          echo "SUSFS:"
+          echo "${SUSFS_COMMIT}"
+
+          echo
+          echo "GKI:"
+          echo "${COMMON_COMMIT}"
+
+          # --------------------------------------------------------
+          # Validate commits before packaging.
+          # --------------------------------------------------------
+
+          test \
+            "${KSU_ACTUAL_COMMIT}" = \
+            "${KSU_COMMIT}"
+
+          test \
+            "${SUSFS_COMMIT}" = \
+            "${{ inputs.susfs_ref }}"
+
+          test \
+            "${COMMON_COMMIT}" = \
+            "${GKI_SHA}"
+
+          # --------------------------------------------------------
+          # Package directory.
+          # --------------------------------------------------------
 
           rm -rf \
             artifact/package
@@ -2117,6 +2072,10 @@ jobs:
             BG7n_final_defconfig \
             artifact/package/
 
+          # --------------------------------------------------------
+          # README
+          # --------------------------------------------------------
+
           cat > \
             artifact/package/README.txt \
             <<EOF
@@ -2134,6 +2093,9 @@ jobs:
 
           SUSFS:
             ${SUSFS_REPO}
+            ${SUSFS_COMMIT}
+
+          SUSFS requested ref:
             ${{ inputs.susfs_ref }}
 
           Required:
@@ -2182,6 +2144,13 @@ jobs:
             SHA256SUMS.txt
           EOF
 
+          # --------------------------------------------------------
+          # Create ZIP.
+          # --------------------------------------------------------
+
+          rm -f \
+            BG7n_GKI_r3_KSU_SUSFS_artifacts.zip
+
           (
             cd artifact/package
 
@@ -2192,6 +2161,15 @@ jobs:
           )
 
           test -s \
+            BG7n_GKI_r3_KSU_SUSFS_artifacts.zip
+
+          echo
+          echo "=== PACKAGE CREATED ==="
+
+          ls -lh \
+            BG7n_GKI_r3_KSU_SUSFS_artifacts.zip
+
+          sha256sum \
             BG7n_GKI_r3_KSU_SUSFS_artifacts.zip
 
       # ============================================================
