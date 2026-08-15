@@ -78,6 +78,7 @@ jobs:
             file \
             flex \
             gawk \
+            gh \
             git \
             gnupg \
             gperf \
@@ -105,6 +106,7 @@ jobs:
           clang --version
           ld.lld --version
           python3 --version
+          gh --version
 
       # ============================================================
       # ANDROID NDK
@@ -468,7 +470,7 @@ jobs:
             }
 
       # ============================================================
-      # APPLY SUSFS PATCHES
+      # APPLY SUSFS
       # ============================================================
 
       - name: Apply SUSFS patches on exact matching base
@@ -565,68 +567,90 @@ jobs:
           test -f common/drivers/kernelsu/Kconfig
           test -f common/drivers/kernelsu/Kbuild
 
-          # ----------------------------------------------------------
-          # Add KernelSU build directory exactly once.
-          # ----------------------------------------------------------
-
+          # KernelSU build integration.
           if ! grep -qF \
             'obj-$(CONFIG_KSU) += kernelsu/' \
             common/drivers/Makefile
           then
-            printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' \
+            printf '%s\n' \
+              'obj-$(CONFIG_KSU) += kernelsu/' \
               >> common/drivers/Makefile
           fi
 
-          # ----------------------------------------------------------
-          # Add KernelSU Kconfig exactly once.
-          #
-          # Replace only the FINAL endmenu in drivers/Kconfig.
-          # ----------------------------------------------------------
-
+          # KernelSU Kconfig integration.
           if ! grep -qF \
             'source "drivers/kernelsu/Kconfig"' \
             common/drivers/Kconfig
           then
 
-            python3 - <<'PY'
-from pathlib import Path
+            awk '
+              {
+                lines[NR] = $0
+              }
 
-p = Path("common/drivers/Kconfig")
-text = p.read_text()
+              END {
+                last_endmenu = 0
 
-needle = 'source "drivers/kernelsu/Kconfig"'
+                for (i = 1; i <= NR; i++) {
+                  if (lines[i] == "endmenu") {
+                    last_endmenu = i
+                  }
+                }
 
-if needle not in text:
-    pos = text.rfind("endmenu")
-    if pos < 0:
-        raise SystemExit("drivers/Kconfig has no final endmenu")
+                if (last_endmenu == 0) {
+                  print "ERROR: final endmenu not found" > "/dev/stderr"
+                  exit 1
+                }
 
-    text = text[:pos] + needle + "\n\n" + text[pos:]
-    p.write_text(text)
-PY
+                for (i = 1; i <= NR; i++) {
+                  if (i == last_endmenu) {
+                    print "source \"drivers/kernelsu/Kconfig\""
+                    print ""
+                  }
 
+                  print lines[i]
+                }
+              }
+            ' common/drivers/Kconfig \
+              > common/drivers/Kconfig.new
+
+            mv \
+              common/drivers/Kconfig.new \
+              common/drivers/Kconfig
           fi
 
           echo "=== KernelSU symlink ==="
-          ls -la common/drivers/kernelsu
+
+          ls -la \
+            common/drivers/kernelsu
 
           echo "=== KernelSU Kconfig hook ==="
+
           grep -nF \
             'drivers/kernelsu/Kconfig' \
             common/drivers/Kconfig
 
           echo "=== KernelSU Makefile hook ==="
+
           grep -nF \
             'obj-$(CONFIG_KSU) += kernelsu/' \
             common/drivers/Makefile
 
-          echo "=== KernelSU symbols ==="
+          echo "=== KSU symbols ==="
+
           grep -Rns \
             -E '^config[[:space:]]+KSU(_SUSFS)?([[:space:]]|$)' \
             common/drivers/kernelsu \
             || true
 
-          test -L common/drivers/kernelsu
+          test -L \
+            common/drivers/kernelsu
+
+          test -f \
+            common/drivers/kernelsu/Kconfig
+
+          test -f \
+            common/drivers/kernelsu/Kbuild
 
           grep -qF \
             'source "drivers/kernelsu/Kconfig"' \
@@ -640,8 +664,14 @@ PY
             '^config[[:space:]]\+KSU\([[:space:]]\|$\)' \
             common/drivers/kernelsu
 
+          grep -Rqs \
+            '^config[[:space:]]\+KSU_SUSFS\([[:space:]]\|$\)' \
+            common/drivers/kernelsu
+
+          echo "=== KernelSU integration passed ==="
+
       # ============================================================
-      # PRE-KCONFIG VALIDATION
+      # VALIDATE KCONFIG VISIBILITY
       # ============================================================
 
       - name: Validate KernelSU and SUSFS Kconfig visibility
@@ -654,12 +684,14 @@ PY
           test -f drivers/kernelsu/Kbuild
 
           echo "=== KSU Kconfig symbols ==="
+
           grep -Rns \
             -E '^config[[:space:]]+KSU($|_)' \
             drivers/kernelsu \
             || true
 
           echo "=== SUSFS Kconfig symbols ==="
+
           grep -Rns \
             -E '^config[[:space:]]+KSU_SUSFS($|_)' \
             drivers/kernelsu \
@@ -674,7 +706,7 @@ PY
             drivers/kernelsu
 
       # ============================================================
-      # CLEAN ANY GENERATED ARTIFACTS FROM SOURCE TREE
+      # REMOVE STALE GENERATED SOURCE ARTIFACTS
       # ============================================================
 
       - name: Remove stale Kconfig generated files
@@ -682,10 +714,6 @@ PY
         working-directory: gki/common
         run: |
           set -euxo pipefail
-
-          # These are generated by in-tree Kconfig operations from failed
-          # or older workflow runs. Remove only generated objects, not
-          # source files and not SUSFS changes.
 
           rm -f .config
           rm -f defconfig
@@ -705,7 +733,7 @@ PY
           echo "No stale in-tree Kconfig output remains."
 
       # ============================================================
-      # GENERATE DEFCONFIG OUTSIDE SOURCE TREE
+      # GENERATE DEFCONFIG OUT OF TREE
       # ============================================================
 
       - name: Generate normalized BG7n KSU + SUSFS defconfig
@@ -726,8 +754,7 @@ PY
           sha256sum "${STOCK_CONFIG}"
 
           # ----------------------------------------------------------
-          # STAGE 1
-          # Normalize stock config using an OUT-OF-TREE Kconfig object.
+          # Normalize stock config OUTSIDE source tree.
           # ----------------------------------------------------------
 
           cp \
@@ -756,8 +783,7 @@ PY
             || true
 
           # ----------------------------------------------------------
-          # STAGE 2
-          # Add KSU/SUSFS to config.
+          # Add KernelSU/SUSFS.
           # ----------------------------------------------------------
 
           {
@@ -765,14 +791,12 @@ PY
               "${CONFIG_OUT}/bg7n_stock_normalized_defconfig"
 
             echo
-
             echo "# KernelSU / SUSFS"
 
             echo "CONFIG_KSU=y"
             echo "CONFIG_KSU_SUSFS=y"
 
             echo
-
             echo "# Required module/KMI baseline"
 
             echo "CONFIG_MODULES=y"
@@ -788,7 +812,7 @@ PY
             "${CONFIG_OUT}/.config"
 
           # ----------------------------------------------------------
-          # Resolve Kconfig.
+          # Resolve actual Kconfig.
           # ----------------------------------------------------------
 
           make \
@@ -808,8 +832,6 @@ PY
             "${CONFIG_OUT}/.config" || {
               echo "::error::CONFIG_KSU was not accepted by Kconfig."
 
-              echo "=== KernelSU Kconfig ==="
-
               grep -Rns \
                 -E '^config[[:space:]]+KSU($|_)' \
                 drivers/kernelsu \
@@ -822,8 +844,6 @@ PY
             '^CONFIG_KSU_SUSFS=y$' \
             "${CONFIG_OUT}/.config" || {
               echo "::error::CONFIG_KSU_SUSFS was not accepted by Kconfig."
-
-              echo "=== SUSFS Kconfig ==="
 
               grep -Rns \
                 -E '^config[[:space:]]+KSU_SUSFS($|_)' \
@@ -843,7 +863,6 @@ PY
 
           # ----------------------------------------------------------
           # Discover additional KSU_SUSFS_* symbols.
-          # Only enable symbols that actually exist.
           # ----------------------------------------------------------
 
           : > "${CONFIG_OUT}/susfs_extra.conf"
@@ -884,7 +903,7 @@ PY
           fi
 
           # ----------------------------------------------------------
-          # Verify after dependency resolution.
+          # Required values after dependency resolution.
           # ----------------------------------------------------------
 
           grep -q \
@@ -896,7 +915,7 @@ PY
             "${CONFIG_OUT}/.config"
 
           # ----------------------------------------------------------
-          # Canonical defconfig OUTSIDE source tree.
+          # Generate canonical defconfig OUTSIDE source tree.
           # ----------------------------------------------------------
 
           make \
@@ -924,7 +943,7 @@ PY
             || true
 
           # ----------------------------------------------------------
-          # Re-expand the canonical defconfig using SAME O= directory.
+          # Re-expand canonical defconfig using same OUT directory.
           # ----------------------------------------------------------
 
           rm -f \
@@ -1013,7 +1032,7 @@ PY
             || true
 
       # ============================================================
-      # PRE-BUILD SOURCE TREE CLEANLINESS
+      # PRE-BUILD SOURCE TREE CHECK
       # ============================================================
 
       - name: Verify GKI source tree is clean before build
@@ -1032,9 +1051,14 @@ PY
 
           echo "=== KernelSU integration check ==="
 
-          test -L drivers/kernelsu
-          test -f drivers/kernelsu/Kconfig
-          test -f drivers/kernelsu/Kbuild
+          test -L \
+            drivers/kernelsu
+
+          test -f \
+            drivers/kernelsu/Kconfig
+
+          test -f \
+            drivers/kernelsu/Kbuild
 
           grep -qF \
             'source "drivers/kernelsu/Kconfig"' \
@@ -1047,10 +1071,9 @@ PY
           test -f \
             arch/arm64/configs/bg7n_defconfig
 
-          echo "=== Config hooks ==="
+          echo "=== Final config ==="
 
-          grep \
-            '^CONFIG_KSU' \
+          grep '^CONFIG_KSU' \
             arch/arm64/configs/bg7n_defconfig \
             || true
 
@@ -1099,11 +1122,11 @@ PY
 
           export MAKEFLAGS="-j${MAKE_JOBS}"
 
-          # Avoid reusing stale GKI output from previous attempts.
+          # Remove stale output only.
           rm -rf \
             out/android12-5.10
 
-          # One more safety check before entering build.sh.
+          # Final source tree check.
           test ! -f common/.config
           test ! -f common/defconfig
           test ! -d common/include/config
@@ -1115,7 +1138,7 @@ PY
             ./build/build.sh
 
       # ============================================================
-      # VERIFY KERNEL
+      # VERIFY KERNEL / ABI / KMI
       # ============================================================
 
       - name: Verify kernel and collect ABI/KMI evidence
@@ -1287,8 +1310,6 @@ PY
           } | tee \
             ../artifact/reports/kernel_verification.txt
 
-          # Hard validation.
-
           grep -q \
             '^CONFIG_KSU=y$' \
             ../artifact/kernel/.config
@@ -1306,7 +1327,7 @@ PY
             ../artifact/kernel/.config
 
       # ============================================================
-      # BUILD SUSFS USERSPACE + KSU MODULE
+      # BUILD SUSFS USERSPACE + MODULE
       # ============================================================
 
       - name: Build SUSFS userspace helper and KernelSU module
@@ -1479,11 +1500,9 @@ PY
             artifact/reports/stock_boot.sha256
 
           if [ -f BG7n_final_defconfig ]; then
-
             cp \
               BG7n_final_defconfig \
               artifact/kernel/bg7n_final_defconfig
-
           fi
 
           find artifact \
@@ -1530,11 +1549,9 @@ PY
             artifact/package/reports
 
           if [ -d artifact/boot ]; then
-
             cp -a \
               artifact/boot \
               artifact/package/boot
-
           fi
 
           cp \
@@ -1542,11 +1559,9 @@ PY
             artifact/package/
 
           if [ -f BG7n_final_defconfig ]; then
-
             cp \
               BG7n_final_defconfig \
               artifact/package/
-
           fi
 
           cat > artifact/package/README.txt <<EOF
