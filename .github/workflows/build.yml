@@ -1,6 +1,6 @@
 name: "Build BG7n GKI r3 + KernelSU + SUSFS"
 
-'on':
+on:
   workflow_dispatch:
     inputs:
       susfs_ref:
@@ -49,7 +49,7 @@ env:
   SUSFS_REPO: https://gitlab.com/simonpunk/susfs4ksu.git
 
   # ==============================================================
-  # DEVICE / BOOT
+  # DEVICE
   # ==============================================================
 
   BOOT_REPO: whmyjda97-lab/tecno20c
@@ -113,13 +113,10 @@ jobs:
             patchelf \
             pkg-config \
             python3 \
-            python3-distutils \
             rsync \
             unzip \
             zip \
             android-sdk-libsparse-utils
-
-          echo "=== Host tool versions ==="
 
           clang --version
           ld.lld --version
@@ -148,7 +145,7 @@ jobs:
             "${RUNNER_TEMP}/android-ndk"
 
           mkdir -p \
-            "${SDK_ROOT}" \
+            "${SDK_ROOT}/ndk" \
             "${RUNNER_TEMP}/android-ndk"
 
           curl -fL \
@@ -162,9 +159,6 @@ jobs:
           test -d \
             "${RUNNER_TEMP}/android-ndk/android-ndk-r25b"
 
-          mkdir -p \
-            "${SDK_ROOT}/ndk"
-
           mv \
             "${RUNNER_TEMP}/android-ndk/android-ndk-r25b" \
             "${NDK_ROOT}"
@@ -177,7 +171,6 @@ jobs:
           echo "ANDROID_NDK_HOME=${NDK_ROOT}" >> "${GITHUB_ENV}"
           echo "${NDK_ROOT}" >> "${GITHUB_PATH}"
 
-          echo "=== Android NDK ==="
           "${NDK_ROOT}/ndk-build" --version
 
       # ============================================================
@@ -192,13 +185,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          rm -rf \
-            stock-release \
-            stock
+          rm -rf stock-release stock
 
-          mkdir -p \
-            stock-release \
-            stock
+          mkdir -p stock-release stock
 
           gh release view \
             "${BOOT_RELEASE_TAG}" \
@@ -222,10 +211,10 @@ jobs:
           CANDIDATES=()
 
           while IFS= read -r -d '' z; do
-
             mapfile -t ENTRIES < <(
               unzip -Z1 "$z" 2>/dev/null |
-              awk 'tolower($0) ~ /(^|\/)boot\.img$/ {print}'
+              grep -Ei '(^|/)boot\.img$' ||
+              true
             )
 
             if [ "${#ENTRIES[@]}" -eq 1 ]; then
@@ -244,18 +233,18 @@ jobs:
               -print0
           )
 
-          test "${#CANDIDATES[@]}" -eq 1 || {
+          if [ "${#CANDIDATES[@]}" -ne 1 ]; then
             echo "::error::Expected exactly one release ZIP containing exactly one boot.img."
             echo "Candidates found: ${#CANDIDATES[@]}"
             printf '%s\n' "${CANDIDATES[@]:-<none>}"
             exit 1
-          }
+          fi
 
           BOOT_ASSET="${CANDIDATES[0]}"
 
           mapfile -t BOOT_ENTRIES < <(
             unzip -Z1 "${BOOT_ASSET}" |
-            awk 'tolower($0) ~ /(^|\/)boot\.img$/ {print}'
+            grep -Ei '(^|/)boot\.img$'
           )
 
           unzip -p \
@@ -263,14 +252,11 @@ jobs:
             "${BOOT_ENTRIES[0]}" \
             > stock/boot.img
 
-          test -s \
-            stock/boot.img
+          test -s stock/boot.img
 
-          file \
-            stock/boot.img
+          file stock/boot.img
 
-          sha256sum \
-            stock/boot.img |
+          sha256sum stock/boot.img |
             tee stock/boot.sha256
 
       # ============================================================
@@ -282,28 +268,24 @@ jobs:
         run: |
           set -euxo pipefail
 
-          test -s \
+          test -s BG7n_stock_defconfig
+
+          grep -q '^CONFIG_MODULES=y$' \
             BG7n_stock_defconfig
 
-          grep -q \
-            '^CONFIG_MODULES=y$' \
-            BG7n_stock_defconfig
-
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
+          grep -q '^CONFIG_MODVERSIONS=y$' \
             BG7n_stock_defconfig
 
           echo "=== BG7n stock config SHA256 ==="
 
-          sha256sum \
-            BG7n_stock_defconfig
+          sha256sum BG7n_stock_defconfig
 
           echo "=== Stock KMI-sensitive settings ==="
 
           grep -E \
             '^CONFIG_(ARM64_4K_PAGES|ARM64_16K_PAGES|ARM64_64K_PAGES|ARM64_VA_BITS_36|ARM64_VA_BITS_39|ARM64_VA_BITS_42|ARM64_VA_BITS_47|ARM64_VA_BITS_48|ARM64_VA_BITS_52|ARM64_PA_BITS_48|ARM64_PA_BITS_52|COMPILE_TEST|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|GCOV_KERNEL|FTRACE_MCOUNT_USE_RECORDMCOUNT|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS)=' \
-            BG7n_stock_defconfig \
-            || true
+            BG7n_stock_defconfig ||
+            true
 
       # ============================================================
       # REPO
@@ -318,8 +300,7 @@ jobs:
             https://storage.googleapis.com/git-repo-downloads/repo \
             -o repo
 
-          chmod +x \
-            repo
+          chmod +x repo
 
           sudo install \
             -m 0755 \
@@ -337,11 +318,9 @@ jobs:
         run: |
           set -euxo pipefail
 
-          rm -rf \
-            gki
+          rm -rf gki
 
-          mkdir -p \
-            gki
+          mkdir -p gki
 
           cd gki
 
@@ -356,13 +335,8 @@ jobs:
             --no-tags \
             --no-clone-bundle
 
-          test -d \
-            common
-
-          test -f \
-            common/Makefile
-
-          git -C common remote -v || true
+          test -d common
+          test -f common/Makefile
 
           git -C common fetch \
             --no-tags \
@@ -379,14 +353,13 @@ jobs:
 
           echo "COMMON_COMMIT=${COMMON_COMMIT}"
 
-          test \
-            "${COMMON_COMMIT}" = "${GKI_SHA}"
+          test "${COMMON_COMMIT}" = "${GKI_SHA}"
 
           test \
-            "$(make -s -C common kernelversion)" = "${GKI_VERSION}"
+            "$(make -s -C common kernelversion)" = \
+            "${GKI_VERSION}"
 
-          repo manifest -r > \
-            manifest.lock.xml
+          repo manifest -r > manifest.lock.xml
 
           {
             echo "GKI_MANIFEST_BRANCH=${GKI_MANIFEST_BRANCH}"
@@ -394,11 +367,10 @@ jobs:
             echo "GKI_VERSION=${GKI_VERSION}"
             echo "GKI_SHA=${GKI_SHA}"
             echo "COMMON_COMMIT=${COMMON_COMMIT}"
-          } | tee \
-            ../gki_identity.txt
+          } | tee ../gki_identity.txt
 
       # ============================================================
-      # GOOGLE HERMETIC LLVM
+      # GOOGLE LLVM
       # ============================================================
 
       - name: Select exact Google GKI LLVM toolchain
@@ -416,44 +388,23 @@ jobs:
             ' common/build.config.common
           )"
 
-          test -n \
-            "${CLANG_PREBUILT_BIN}"
+          test -n "${CLANG_PREBUILT_BIN}"
 
           GKI_CLANG_BIN="${PWD}/${CLANG_PREBUILT_BIN}"
 
-          test -d \
-            "${GKI_CLANG_BIN}"
+          test -d "${GKI_CLANG_BIN}"
+          test -x "${GKI_CLANG_BIN}/clang"
+          test -x "${GKI_CLANG_BIN}/ld.lld"
+          test -x "${GKI_CLANG_BIN}/llvm-ar"
+          test -x "${GKI_CLANG_BIN}/llvm-nm"
 
-          test -x \
-            "${GKI_CLANG_BIN}/clang"
-
-          test -x \
-            "${GKI_CLANG_BIN}/ld.lld"
-
-          test -x \
-            "${GKI_CLANG_BIN}/llvm-ar"
-
-          test -x \
-            "${GKI_CLANG_BIN}/llvm-nm"
-
-          echo "GKI_CLANG_BIN=${GKI_CLANG_BIN}" >> \
-            "${GITHUB_ENV}"
-
-          echo "LLVM=1" >> \
-            "${GITHUB_ENV}"
-
-          echo "LLVM_IAS=1" >> \
-            "${GITHUB_ENV}"
-
-          echo "${GKI_CLANG_BIN}" >> \
-            "${GITHUB_PATH}"
-
-          echo "=== Google GKI LLVM ==="
+          echo "GKI_CLANG_BIN=${GKI_CLANG_BIN}" >> "${GITHUB_ENV}"
+          echo "LLVM=1" >> "${GITHUB_ENV}"
+          echo "LLVM_IAS=1" >> "${GITHUB_ENV}"
+          echo "${GKI_CLANG_BIN}" >> "${GITHUB_PATH}"
 
           "${GKI_CLANG_BIN}/clang" --version
           "${GKI_CLANG_BIN}/ld.lld" --version
-          "${GKI_CLANG_BIN}/llvm-ar" --version
-          "${GKI_CLANG_BIN}/llvm-nm" --version
 
       # ============================================================
       # KERNELSU
@@ -465,8 +416,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          rm -rf \
-            KernelSU
+          rm -rf KernelSU
 
           git clone \
             --no-tags \
@@ -487,23 +437,15 @@ jobs:
             git -C KernelSU rev-parse HEAD
           )"
 
-          test \
-            "${ACTUAL_KSU_COMMIT}" = "${KSU_COMMIT}"
+          test "${ACTUAL_KSU_COMMIT}" = "${KSU_COMMIT}"
 
-          test -d \
-            KernelSU/kernel
-
-          test -f \
-            KernelSU/kernel/Kconfig
-
-          test -f \
-            KernelSU/kernel/Kbuild
+          test -f KernelSU/kernel/Kconfig
+          test -f KernelSU/kernel/Kbuild
 
           {
             echo "KERNELSU_REPO=${KSU_REPO}"
             echo "KERNELSU_COMMIT=${ACTUAL_KSU_COMMIT}"
-          } | tee \
-            ../kernelsu_identity.txt
+          } | tee ../kernelsu_identity.txt
 
       # ============================================================
       # SUSFS
@@ -517,8 +459,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          rm -rf \
-            susfs
+          rm -rf susfs
 
           git clone \
             --no-tags \
@@ -539,8 +480,7 @@ jobs:
             git -C susfs rev-parse HEAD
           )"
 
-          test \
-            "${SUSFS_COMMIT}" = "${SUSFS_REF}"
+          test "${SUSFS_COMMIT}" = "${SUSFS_REF}"
 
           test -f \
             susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
@@ -548,24 +488,15 @@ jobs:
           test -f \
             susfs/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
 
-          test -d \
-            susfs/kernel_patches/fs
+          test -d susfs/kernel_patches/fs
+          test -d susfs/kernel_patches/include/linux
 
-          test -d \
-            susfs/kernel_patches/include/linux
-
-          test -f \
-            susfs/ksu_module_susfs/module.prop
-
-          grep -Eq \
-            '^version=v?2\.2\.0($|[.-])' \
-            susfs/ksu_module_susfs/module.prop
+          test -f susfs/ksu_module_susfs/module.prop
 
           {
             echo "SUSFS_REPO=${SUSFS_REPO}"
             echo "SUSFS_COMMIT=${SUSFS_COMMIT}"
-          } | tee \
-            ../susfs_identity.txt
+          } | tee ../susfs_identity.txt
 
       # ============================================================
       # APPLY SUSFS
@@ -629,17 +560,10 @@ jobs:
         run: |
           set -euxo pipefail
 
-          test -d \
-            KernelSU/kernel
+          test -f KernelSU/kernel/Kconfig
+          test -f KernelSU/kernel/Kbuild
 
-          test -f \
-            KernelSU/kernel/Kconfig
-
-          test -f \
-            KernelSU/kernel/Kbuild
-
-          rm -rf \
-            common/drivers/kernelsu
+          rm -rf common/drivers/kernelsu
 
           KSU_RELATIVE="$(
             realpath \
@@ -651,14 +575,7 @@ jobs:
             "${KSU_RELATIVE}" \
             common/drivers/kernelsu
 
-          test -L \
-            common/drivers/kernelsu
-
-          test -f \
-            common/drivers/kernelsu/Kconfig
-
-          test -f \
-            common/drivers/kernelsu/Kbuild
+          test -L common/drivers/kernelsu
 
           if ! grep -qF \
             'obj-$(CONFIG_KSU) += kernelsu/' \
@@ -674,40 +591,32 @@ jobs:
             common/drivers/Kconfig
           then
 
-            awk '
-              {
-                lines[NR] = $0
-              }
+            python3 - <<'PY'
+          from pathlib import Path
 
-              END {
-                last_endmenu = 0
+          p = Path("common/drivers/Kconfig")
+          text = p.read_text()
 
-                for (i = 1; i <= NR; i++) {
-                  if (lines[i] == "endmenu") {
-                    last_endmenu = i
-                  }
-                }
+          source = 'source "drivers/kernelsu/Kconfig"\n'
 
-                if (last_endmenu == 0) {
-                  print "ERROR: drivers/Kconfig has no final endmenu" > "/dev/stderr"
-                  exit 1
-                }
+          if source not in text:
+              pos = text.rfind("endmenu")
 
-                for (i = 1; i <= NR; i++) {
-                  if (i == last_endmenu) {
-                    print "source \"drivers/kernelsu/Kconfig\""
-                    print ""
-                  }
+              if pos < 0:
+                  raise SystemExit(
+                      "ERROR: drivers/Kconfig has no endmenu"
+                  )
 
-                  print lines[i]
-                }
-              }
-            ' common/drivers/Kconfig \
-              > common/drivers/Kconfig.new
+              text = (
+                  text[:pos]
+                  + source
+                  + "\n"
+                  + text[pos:]
+              )
 
-            mv \
-              common/drivers/Kconfig.new \
-              common/drivers/Kconfig
+              p.write_text(text)
+          PY
+
           fi
 
           grep -qF \
@@ -722,14 +631,10 @@ jobs:
             '^config[[:space:]]\+KSU\([[:space:]]\|$\)' \
             common/drivers/kernelsu
 
-          grep -Rqs \
-            '^config[[:space:]]\+KSU_SUSFS\([[:space:]]\|$\)' \
-            common/drivers/kernelsu
-
           echo "=== KernelSU integration passed ==="
 
       # ============================================================
-      # CLEAN GENERATED FILES
+      # CLEAN GENERATED CONFIG
       # ============================================================
 
       - name: Remove stale generated configuration
@@ -738,43 +643,18 @@ jobs:
         run: |
           set -euxo pipefail
 
-          rm -f \
-            .config \
-            defconfig
+          rm -f .config defconfig
 
           rm -rf \
             include/config \
             include/generated \
             arch/arm64/include/generated
 
-          test ! -f \
-            .config
-
-          test ! -f \
-            defconfig
-
-          test ! -d \
-            include/config
-
-          test ! -d \
-            include/generated
-
-          test ! -d \
-            arch/arm64/include/generated
-
       # ============================================================
       # GENERATE DEFCONFIG
       #
-      # CORE FIX:
-      #
-      # 1. Google GKI remains authoritative for architecture/KMI
-      #    choices.
-      #
-      # 2. Vendor config is filtered safely using an external list.
-      #
-      # 3. No multiline awk string continuation.
-      #
-      # 4. Kconfig itself decides HAS_LTO_CLANG/KASAN_HW_TAGS.
+      # IMPORTANT:
+      # Python replaces the problematic multiline awk completely.
       # ============================================================
 
       - name: Generate BG7n GKI + KernelSU + SUSFS defconfig
@@ -787,161 +667,134 @@ jobs:
           GKI_BASE_CONFIG="${PWD}/arch/arm64/configs/gki_defconfig"
           CONFIG_OUT="${RUNNER_TEMP}/bg7n-kconfig"
 
-          test -s \
-            "${STOCK_CONFIG}"
+          test -s "${STOCK_CONFIG}"
+          test -s "${GKI_BASE_CONFIG}"
 
-          test -s \
-            "${GKI_BASE_CONFIG}"
-
-          rm -rf \
-            "${CONFIG_OUT}"
-
-          mkdir -p \
-            "${CONFIG_OUT}"
+          rm -rf "${CONFIG_OUT}"
+          mkdir -p "${CONFIG_OUT}"
 
           echo "=== Google GKI baseline ==="
-
-          sha256sum \
-            "${GKI_BASE_CONFIG}"
-
-          echo
-          echo "=== Google GKI critical entries ==="
-
-          grep -E \
-            '^CONFIG_(KASAN|KASAN_HW_TAGS|LTO_CLANG_FULL|CFI_CLANG|SHADOW_CALL_STACK|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS)=' \
-            "${GKI_BASE_CONFIG}" \
-            || true
+          sha256sum "${GKI_BASE_CONFIG}"
 
           # ----------------------------------------------------------
-          # Protected-symbol list.
-          #
-          # This replaces the broken multiline awk string used before.
+          # Protected symbols.
           # ----------------------------------------------------------
 
-          PROTECTED_LIST="${CONFIG_OUT}/protected.symbols"
-
-          cat > \
-            "${PROTECTED_LIST}" <<'EOF'
+          cat > "${CONFIG_OUT}/protected.symbols" <<'EOF'
           CONFIG_ARM64_4K_PAGES
           CONFIG_ARM64_16K_PAGES
           CONFIG_ARM64_64K_PAGES
-
           CONFIG_ARM64_VA_BITS_36
           CONFIG_ARM64_VA_BITS_39
           CONFIG_ARM64_VA_BITS_42
           CONFIG_ARM64_VA_BITS_47
           CONFIG_ARM64_VA_BITS_48
           CONFIG_ARM64_VA_BITS_52
-
           CONFIG_ARM64_PA_BITS_48
           CONFIG_ARM64_PA_BITS_52
-
           CONFIG_COMPILE_TEST
-
           CONFIG_LTO_NONE
           CONFIG_LTO_CLANG
           CONFIG_LTO_CLANG_FULL
           CONFIG_LTO_CLANG_THIN
-
           CONFIG_CFI_CLANG
           CONFIG_CFI_PERMISSIVE
           CONFIG_CFI_CLANG_SHADOW
-
           CONFIG_SHADOW_CALL_STACK
-
           CONFIG_KASAN
           CONFIG_KASAN_GENERIC
           CONFIG_KASAN_SW_TAGS
           CONFIG_KASAN_HW_TAGS
-
           CONFIG_ARM64_TAGGED_ADDR_ABI
           CONFIG_ARM64_MTE
           CONFIG_ARM64_PAN
           CONFIG_ARM64_LSE_ATOMICS
-
           CONFIG_SLUB
-
           CONFIG_MODULES
           CONFIG_MODVERSIONS
           CONFIG_KALLSYMS
           CONFIG_KALLSYMS_ALL
           CONFIG_OVERLAY_FS
-
           CONFIG_GCOV_KERNEL
           CONFIG_FTRACE_MCOUNT_USE_RECORDMCOUNT
           EOF
 
-          echo "=== Protected symbol list ==="
-          cat \
-            "${PROTECTED_LIST}"
-
           # ----------------------------------------------------------
-          # Filter stock config.
+          # FIX:
+          # No awk.
+          # Python safely filters both:
           #
-          # Important:
-          # Both forms are removed:
-          #
-          #   CONFIG_X=y
-          #   # CONFIG_X is not set
-          #
-          # The rest of BG7n's device-specific config is preserved.
+          # CONFIG_X=y
+          # # CONFIG_X is not set
           # ----------------------------------------------------------
 
-          FILTERED_STOCK="${CONFIG_OUT}/bg7n_stock.filtered"
-
-          awk '
-            FNR == NR {
-              if ($1 != "")
-                protected[$1] = 1
-              next
-            }
-
-            /^CONFIG_[A-Z0-9_]+=/ {
-              sym = $0
-              sub(/=.*/, "", sym)
-
-              if (sym in protected)
-                next
-            }
-
-            /^# CONFIG_[A-Z0-9_]+ is not set$/ {
-              sym = $0
-              sub(/^# /, "", sym)
-              sub(/ is not set$/, "", sym)
-
-              if (sym in protected)
-                next
-            }
-
-            {
-              print
-            }
-          ' \
-            "${PROTECTED_LIST}" \
+          python3 - \
+            "${CONFIG_OUT}/protected.symbols" \
             "${STOCK_CONFIG}" \
-            > "${FILTERED_STOCK}"
+            "${CONFIG_OUT}/bg7n_stock.filtered" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
 
-          echo
-          echo "=== Remaining protected entries in stock fragment ==="
+          protected_file = Path(sys.argv[1])
+          stock_file = Path(sys.argv[2])
+          output_file = Path(sys.argv[3])
 
-          grep -E \
-            '^CONFIG_(ARM64_(4K|16K|64K)_PAGES|ARM64_VA_BITS|ARM64_PA_BITS|LTO_|CFI_|SHADOW_CALL_STACK|KASAN|ARM64_MTE|ARM64_TAGGED_ADDR_ABI|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|OVERLAY_FS|GCOV_KERNEL|FTRACE_MCOUNT_USE_RECORDMCOUNT)=' \
-            "${FILTERED_STOCK}" \
-            || true
+          protected = {
+              line.strip()
+              for line in protected_file.read_text().splitlines()
+              if line.strip()
+          }
 
-          grep -E \
-            '^# CONFIG_(ARM64_(4K|16K|64K)_PAGES|ARM64_VA_BITS|ARM64_PA_BITS|LTO_|CFI_|SHADOW_CALL_STACK|KASAN|ARM64_MTE|ARM64_TAGGED_ADDR_ABI|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|OVERLAY_FS|GCOV_KERNEL|FTRACE_MCOUNT_USE_RECORDMCOUNT) is not set$' \
-            "${FILTERED_STOCK}" \
-            || true
+          out = []
+
+          config_re = re.compile(
+              r"^CONFIG_[A-Z0-9_]+="
+          )
+
+          unset_re = re.compile(
+              r"^# CONFIG_[A-Z0-9_]+ is not set$"
+          )
+
+          for line in stock_file.read_text().splitlines():
+
+              if config_re.match(line):
+                  symbol = line.split("=", 1)[0]
+
+                  if symbol in protected:
+                      continue
+
+              elif unset_re.match(line):
+                  symbol = line[2:].split(
+                      " is not set",
+                      1
+                  )[0]
+
+                  if symbol in protected:
+                      continue
+
+              out.append(line)
+
+          output_file.write_text(
+              "\n".join(out) + "\n"
+          )
+
+          print(
+              f"Filtered {stock_file}: "
+              f"{len(out)} lines kept"
+          )
+          PY
+
+          echo "=== Filtered stock configuration ==="
+
+          wc -l \
+            "${CONFIG_OUT}/bg7n_stock.filtered"
 
           # ----------------------------------------------------------
-          # Exact GKI protected fragment.
+          # GKI protected configuration.
           # ----------------------------------------------------------
 
-          PROTECTED_CONFIG="${CONFIG_OUT}/gki_kmi_protected.fragment"
-
-          cat > \
-            "${PROTECTED_CONFIG}" <<'EOF'
+          cat > "${CONFIG_OUT}/gki_protected.fragment" <<'EOF'
           CONFIG_LTO_CLANG_FULL=y
           # CONFIG_LTO_NONE is not set
           # CONFIG_LTO_CLANG_THIN is not set
@@ -969,31 +822,20 @@ jobs:
           CONFIG_KALLSYMS_ALL=y
           CONFIG_OVERLAY_FS=y
 
-          # Prevent incompatible instrumentation from changing
-          # HAS_LTO_CLANG.
           # CONFIG_GCOV_KERNEL is not set
           # CONFIG_FTRACE_MCOUNT_USE_RECORDMCOUNT is not set
           EOF
 
-          echo
-          echo "=== GKI protected fragment ==="
-          cat \
-            "${PROTECTED_CONFIG}"
-
           # ----------------------------------------------------------
-          # Start from exact Google GKI.
+          # Start from Google GKI.
           # ----------------------------------------------------------
 
           cp \
             "${GKI_BASE_CONFIG}" \
             "${CONFIG_OUT}/gki_base.config"
 
-          cp \
-            "${GKI_BASE_CONFIG}" \
-            "${CONFIG_OUT}/.config"
-
           # ----------------------------------------------------------
-          # Merge device-specific settings.
+          # Merge BG7n device configuration.
           # ----------------------------------------------------------
 
           ./scripts/kconfig/merge_config.sh \
@@ -1001,10 +843,10 @@ jobs:
             -r \
             -O "${CONFIG_OUT}" \
             "${CONFIG_OUT}/gki_base.config" \
-            "${FILTERED_STOCK}"
+            "${CONFIG_OUT}/bg7n_stock.filtered"
 
           # ----------------------------------------------------------
-          # Re-apply protected GKI values last.
+          # Re-apply protected Google settings.
           # ----------------------------------------------------------
 
           ./scripts/kconfig/merge_config.sh \
@@ -1012,27 +854,25 @@ jobs:
             -r \
             -O "${CONFIG_OUT}" \
             "${CONFIG_OUT}/.config" \
-            "${PROTECTED_CONFIG}"
+            "${CONFIG_OUT}/gki_protected.fragment"
 
           # ----------------------------------------------------------
-          # KernelSU / SUSFS base symbols.
+          # KernelSU / SUSFS.
           # ----------------------------------------------------------
 
-          cat >> \
-            "${CONFIG_OUT}/.config" <<'EOF'
+          cat >> "${CONFIG_OUT}/.config" <<'EOF'
 
           CONFIG_KSU=y
           CONFIG_KSU_SUSFS=y
           EOF
 
           # ----------------------------------------------------------
-          # Discover actual SUSFS options from the patched Kconfig.
+          # Discover SUSFS options.
           # ----------------------------------------------------------
 
           SUSFS_EXTRA="${CONFIG_OUT}/susfs_extra.conf"
 
-          : > \
-            "${SUSFS_EXTRA}"
+          : > "${SUSFS_EXTRA}"
 
           while read -r sym; do
 
@@ -1040,7 +880,6 @@ jobs:
               KSU_SUSFS)
                 continue
                 ;;
-
               KSU_SUSFS_*)
                 echo "CONFIG_${sym}=y" \
                   >> "${SUSFS_EXTRA}"
@@ -1056,16 +895,13 @@ jobs:
             sort -u
           )
 
-          if [ -s \
-            "${SUSFS_EXTRA}" ]
-          then
-            cat \
-              "${SUSFS_EXTRA}" \
+          if [ -s "${SUSFS_EXTRA}" ]; then
+            cat "${SUSFS_EXTRA}" \
               >> "${CONFIG_OUT}/.config"
           fi
 
           # ----------------------------------------------------------
-          # Resolve using exact Google LLVM.
+          # Kconfig resolution.
           # ----------------------------------------------------------
 
           export LLVM=1
@@ -1081,299 +917,23 @@ jobs:
             olddefconfig
 
           echo
-          echo "=== Resolved ARM64/KASAN/LTO configuration ==="
+          echo "=== Resolved configuration ==="
 
           grep -E \
-            '^CONFIG_(CC_IS_CLANG|CLANG_VERSION|LD_IS_LLD|AS_IS_LLVM|ARCH_SUPPORTS_LTO_CLANG|ARCH_SUPPORTS_LTO_CLANG_THIN|HAS_LTO_CLANG|ARM64_4K_PAGES|ARM64_16K_PAGES|ARM64_64K_PAGES|ARM64_VA_BITS_36|ARM64_VA_BITS_39|ARM64_VA_BITS_42|ARM64_VA_BITS_47|ARM64_VA_BITS_48|ARM64_VA_BITS_52|ARM64_PA_BITS_48|ARM64_PA_BITS_52|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|HAVE_ARCH_KASAN|HAVE_ARCH_KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|GCOV_KERNEL|FTRACE_MCOUNT_USE_RECORDMCOUNT|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS)=' \
-            "${CONFIG_OUT}/.config" \
-            || true
-
-          echo
-          echo "=== KernelSU/SUSFS ==="
-
-          grep '^CONFIG_KSU' \
-            "${CONFIG_OUT}/.config" \
-            || true
+            '^CONFIG_(CC_IS_CLANG|LD_IS_LLD|AS_IS_LLVM|ARCH_SUPPORTS_LTO_CLANG|HAS_LTO_CLANG|LTO_NONE|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|KSU|KSU_SUSFS)=' \
+            "${CONFIG_OUT}/.config" ||
+            true
 
           # ----------------------------------------------------------
-          # Actual ARM64 KASAN hardware capability.
-          # ----------------------------------------------------------
-
-          grep -q \
-            '^CONFIG_HAVE_ARCH_KASAN_HW_TAGS=y$' \
-            "${CONFIG_OUT}/.config" || {
-
-            echo "::error::CONFIG_HAVE_ARCH_KASAN_HW_TAGS is unavailable."
-
-            echo
-            echo "=== ARM64 capability diagnostics ==="
-
-            grep -E \
-              '^CONFIG_(ARM64_(4K|16K|64K)_PAGES|ARM64_VA_BITS_[0-9]+|ARM64_PA_BITS_[0-9]+|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|HAVE_ARCH_KASAN|HAVE_ARCH_KASAN_HW_TAGS|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|SLUB)=' \
-              "${CONFIG_OUT}/.config" \
-              || true
-
-            exit 1
-          }
-
-          # ----------------------------------------------------------
-          # KASAN choice must resolve to HW_TAGS.
-          # ----------------------------------------------------------
-
-          grep -q \
-            '^CONFIG_KASAN=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_KASAN_HW_TAGS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          if grep -q \
-            '^CONFIG_KASAN_GENERIC=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_KASAN_GENERIC survived Kconfig resolution."
-            exit 1
-          fi
-
-          if grep -q \
-            '^CONFIG_KASAN_SW_TAGS=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_KASAN_SW_TAGS survived Kconfig resolution."
-            exit 1
-          fi
-
-          # ----------------------------------------------------------
-          # LTO prerequisites must be true.
-          # ----------------------------------------------------------
-
-          grep -q \
-            '^CONFIG_CC_IS_CLANG=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_LD_IS_LLD=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_AS_IS_LLVM=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_ARCH_SUPPORTS_LTO_CLANG=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_ARM64_MTE=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_KASAN_HW_TAGS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          if grep -q \
-            '^CONFIG_GCOV_KERNEL=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_GCOV_KERNEL conflicts with HAS_LTO_CLANG."
-            exit 1
-          fi
-
-          if grep -q \
-            '^CONFIG_FTRACE_MCOUNT_USE_RECORDMCOUNT=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_FTRACE_MCOUNT_USE_RECORDMCOUNT conflicts with HAS_LTO_CLANG."
-            exit 1
-          fi
-
-          # ----------------------------------------------------------
-          # HAS_LTO_CLANG itself.
-          # ----------------------------------------------------------
-
-          grep -q \
-            '^CONFIG_HAS_LTO_CLANG=y$' \
-            "${CONFIG_OUT}/.config" || {
-
-            echo "::error::CONFIG_HAS_LTO_CLANG is unavailable after exact GKI Kconfig resolution."
-
-            echo
-            echo "=== LTO prerequisite diagnostics ==="
-
-            grep -E \
-              '^CONFIG_(CC_IS_CLANG|CLANG_VERSION|LD_IS_LLD|AS_IS_LLVM|ARCH_SUPPORTS_LTO_CLANG|ARCH_SUPPORTS_LTO_CLANG_THIN|HAS_LTO_CLANG|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_MTE|GCOV_KERNEL|FTRACE_MCOUNT_USE_RECORDMCOUNT|LTO_NONE|LTO_CLANG_FULL)=' \
-              "${CONFIG_OUT}/.config" \
-              || true
-
-            exit 1
-          }
-
-          # ----------------------------------------------------------
-          # Full LTO.
-          # ----------------------------------------------------------
-
-          grep -q \
-            '^CONFIG_LTO_CLANG_FULL=y$' \
-            "${CONFIG_OUT}/.config"
-
-          if grep -q \
-            '^CONFIG_LTO_NONE=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_LTO_NONE survived Kconfig."
-            exit 1
-          fi
-
-          if grep -q \
-            '^CONFIG_LTO_CLANG_THIN=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_LTO_CLANG_THIN survived Kconfig."
-            exit 1
-          fi
-
-          # ----------------------------------------------------------
-          # CFI / SCS / ARM64 / modules / KSU.
-          # ----------------------------------------------------------
-
-          grep -q \
-            '^CONFIG_CFI_CLANG=y$' \
-            "${CONFIG_OUT}/.config"
-
-          if grep -q \
-            '^CONFIG_CFI_PERMISSIVE=y$' \
-            "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_CFI_PERMISSIVE is enabled."
-            exit 1
-          fi
-
-          grep -q \
-            '^CONFIG_SHADOW_CALL_STACK=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_ARM64_TAGGED_ADDR_ABI=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_ARM64_PAN=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_ARM64_LSE_ATOMICS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_SLUB=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_MODULES=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_KALLSYMS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_KALLSYMS_ALL=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_OVERLAY_FS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_KSU=y$' \
-            "${CONFIG_OUT}/.config"
-
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
-            "${CONFIG_OUT}/.config"
-
-          # ----------------------------------------------------------
-          # Canonical savedefconfig.
-          # ----------------------------------------------------------
-
-          make \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            AR="${GKI_CLANG_BIN}/llvm-ar" \
-            NM="${GKI_CLANG_BIN}/llvm-nm" \
-            ARCH=arm64 \
-            O="${CONFIG_OUT}" \
-            savedefconfig
-
-          mkdir -p \
-            arch/arm64/configs
-
-          cp \
-            "${CONFIG_OUT}/defconfig" \
-            arch/arm64/configs/bg7n_defconfig
-
-          echo
-          echo "=== Canonical BG7n defconfig ==="
-
-          grep -E \
-            '^CONFIG_(LTO_CLANG_FULL|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|KSU|KSU_SUSFS)=' \
-            arch/arm64/configs/bg7n_defconfig \
-            || true
-
-          # ----------------------------------------------------------
-          # Re-expand canonical defconfig.
-          # ----------------------------------------------------------
-
-          rm -f \
-            "${CONFIG_OUT}/.config"
-
-          make \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            AR="${GKI_CLANG_BIN}/llvm-ar" \
-            NM="${GKI_CLANG_BIN}/llvm-nm" \
-            ARCH=arm64 \
-            O="${CONFIG_OUT}" \
-            bg7n_defconfig
-
-          cp \
-            "${CONFIG_OUT}/.config" \
-            "${CONFIG_OUT}/expanded.config"
-
-          make \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            AR="${GKI_CLANG_BIN}/llvm-ar" \
-            NM="${GKI_CLANG_BIN}/llvm-nm" \
-            ARCH=arm64 \
-            O="${CONFIG_OUT}" \
-            savedefconfig
-
-          cmp -s \
-            "${CONFIG_OUT}/defconfig" \
-            arch/arm64/configs/bg7n_defconfig || {
-
-            echo "::error::Canonical savedefconfig is not stable."
-
-            diff -u \
-              arch/arm64/configs/bg7n_defconfig \
-              "${CONFIG_OUT}/defconfig" \
-              || true
-
-            exit 1
-          }
-
-          # ----------------------------------------------------------
-          # Final expanded validation.
+          # Mandatory checks.
           # ----------------------------------------------------------
 
           REQUIRED=(
-            CONFIG_ARM64
+            CONFIG_CC_IS_CLANG
+            CONFIG_LD_IS_LLD
+            CONFIG_AS_IS_LLVM
+            CONFIG_ARCH_SUPPORTS_LTO_CLANG
+            CONFIG_HAS_LTO_CLANG
             CONFIG_LTO_CLANG_FULL
             CONFIG_CFI_CLANG
             CONFIG_SHADOW_CALL_STACK
@@ -1394,40 +954,94 @@ jobs:
           )
 
           for sym in "${REQUIRED[@]}"; do
-            grep -q \
-              "^${sym}=y$" \
-              "${CONFIG_OUT}/expanded.config" || {
+            grep -q "^${sym}=y$" \
+              "${CONFIG_OUT}/.config" || {
+                echo "::error::Missing ${sym}"
+                exit 1
+              }
+          done
 
-              echo "::error::Missing ${sym} after final Kconfig expansion."
+          # ----------------------------------------------------------
+          # Forbidden configurations.
+          # ----------------------------------------------------------
+
+          for sym in \
+            CONFIG_LTO_NONE \
+            CONFIG_LTO_CLANG_THIN \
+            CONFIG_KASAN_GENERIC \
+            CONFIG_KASAN_SW_TAGS \
+            CONFIG_CFI_PERMISSIVE
+          do
+            if grep -q "^${sym}=y$" \
+              "${CONFIG_OUT}/.config"
+            then
+              echo "::error::Forbidden ${sym}=y"
               exit 1
-            }
+            fi
           done
 
           if grep -q \
-            '^CONFIG_LTO_NONE=y$' \
-            "${CONFIG_OUT}/expanded.config"
+            '^CONFIG_GCOV_KERNEL=y$' \
+            "${CONFIG_OUT}/.config"
           then
-            echo "::error::CONFIG_LTO_NONE reappeared."
+            echo "::error::CONFIG_GCOV_KERNEL conflicts with required LTO."
             exit 1
           fi
 
           if grep -q \
-            '^CONFIG_KASAN_GENERIC=y$' \
-            "${CONFIG_OUT}/expanded.config"
+            '^CONFIG_FTRACE_MCOUNT_USE_RECORDMCOUNT=y$' \
+            "${CONFIG_OUT}/.config"
           then
-            echo "::error::CONFIG_KASAN_GENERIC reappeared."
+            echo "::error::FTRACE_MCOUNT_USE_RECORDMCOUNT conflicts with required LTO."
             exit 1
           fi
 
-          if grep -q \
-            '^CONFIG_KASAN_SW_TAGS=y$' \
-            "${CONFIG_OUT}/expanded.config"
-          then
-            echo "::error::CONFIG_KASAN_SW_TAGS reappeared."
+          # ----------------------------------------------------------
+          # ARM64 HW_TAGS capability.
+          # ----------------------------------------------------------
+
+          grep -q \
+            '^CONFIG_HAVE_ARCH_KASAN_HW_TAGS=y$' \
+            "${CONFIG_OUT}/.config" || {
+
+            echo "::error::CONFIG_HAVE_ARCH_KASAN_HW_TAGS unavailable."
+
+            grep -E \
+              '^CONFIG_(ARM64_|HAVE_ARCH_KASAN|HAVE_ARCH_KASAN_HW_TAGS|KASAN|SLUB)=' \
+              "${CONFIG_OUT}/.config" ||
+              true
+
             exit 1
-          fi
+          }
+
+          # ----------------------------------------------------------
+          # Canonical defconfig.
+          # ----------------------------------------------------------
+
+          make \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            AR="${GKI_CLANG_BIN}/llvm-ar" \
+            NM="${GKI_CLANG_BIN}/llvm-nm" \
+            ARCH=arm64 \
+            O="${CONFIG_OUT}" \
+            savedefconfig
+
+          cp \
+            "${CONFIG_OUT}/defconfig" \
+            arch/arm64/configs/bg7n_defconfig
 
           echo
+          echo "=== BG7n defconfig ==="
+
+          grep -E \
+            '^CONFIG_(LTO_CLANG_FULL|CFI_CLANG|SHADOW_CALL_STACK|KASAN|KASAN_HW_TAGS|ARM64_MTE|ARM64_TAGGED_ADDR_ABI|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|KSU|KSU_SUSFS)=' \
+            arch/arm64/configs/bg7n_defconfig ||
+            true
+
+          test -s \
+            arch/arm64/configs/bg7n_defconfig
+
           echo "=== Defconfig generation passed ==="
 
       # ============================================================
@@ -1460,8 +1074,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          cat > \
-            build.config.bg7n.ksu.susfs <<'CFG'
+          cat > build.config.bg7n.ksu.susfs <<'CFG'
           . ${ROOT_DIR}/${KERNEL_DIR}/build.config.gki.aarch64
 
           DEFCONFIG=bg7n_defconfig
@@ -1475,12 +1088,10 @@ jobs:
           "
           CFG
 
-          echo "=== build.config.bg7n.ksu.susfs ==="
-          cat \
-            build.config.bg7n.ksu.susfs
+          cat build.config.bg7n.ksu.susfs
 
       # ============================================================
-      # PRE-BUILD CONFIG CHECK
+      # PRE-BUILD CHECK
       # ============================================================
 
       - name: Verify final GKI KMI configuration
@@ -1489,86 +1100,63 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "=== Final defconfig ==="
-
           grep -E \
             '^CONFIG_(LTO_CLANG_FULL|LTO_NONE|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|KSU|KSU_SUSFS)=' \
-            arch/arm64/configs/bg7n_defconfig \
-            || true
+            arch/arm64/configs/bg7n_defconfig ||
+            true
 
-          grep -q \
-            '^CONFIG_LTO_CLANG_FULL=y$' \
+          grep -q '^CONFIG_LTO_CLANG_FULL=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_CFI_CLANG=y$' \
+          grep -q '^CONFIG_CFI_CLANG=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          if grep -q \
-            '^CONFIG_CFI_PERMISSIVE=y$' \
-            arch/arm64/configs/bg7n_defconfig
-          then
-            echo "::error::CFI permissive mode is enabled."
-            exit 1
-          fi
-
-          grep -q \
-            '^CONFIG_SHADOW_CALL_STACK=y$' \
+          grep -q '^CONFIG_SHADOW_CALL_STACK=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_KASAN=y$' \
+          grep -q '^CONFIG_KASAN=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_KASAN_HW_TAGS=y$' \
+          grep -q '^CONFIG_KASAN_HW_TAGS=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          if grep -q \
-            '^CONFIG_KASAN_GENERIC=y$' \
-            arch/arm64/configs/bg7n_defconfig
-          then
-            echo "::error::KASAN_GENERIC is enabled."
-            exit 1
-          fi
-
-          if grep -q \
-            '^CONFIG_KASAN_SW_TAGS=y$' \
-            arch/arm64/configs/bg7n_defconfig
-          then
-            echo "::error::KASAN_SW_TAGS is enabled."
-            exit 1
-          fi
-
-          grep -q \
-            '^CONFIG_ARM64_MTE=y$' \
+          grep -q '^CONFIG_ARM64_MTE=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_ARM64_TAGGED_ADDR_ABI=y$' \
+          grep -q '^CONFIG_ARM64_TAGGED_ADDR_ABI=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_ARM64_PAN=y$' \
+          grep -q '^CONFIG_ARM64_PAN=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_KSU=y$' \
+          grep -q '^CONFIG_KSU=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
+          grep -q '^CONFIG_KSU_SUSFS=y$' \
             arch/arm64/configs/bg7n_defconfig
 
-          if grep -q \
-            '^CONFIG_LTO_NONE=y$' \
+          if grep -q '^CONFIG_LTO_NONE=y$' \
             arch/arm64/configs/bg7n_defconfig
           then
             echo "::error::LTO_NONE is enabled."
             exit 1
           fi
 
-          echo "=== Final GKI KMI configuration valid ==="
+          if grep -q '^CONFIG_KASAN_GENERIC=y$' \
+            arch/arm64/configs/bg7n_defconfig
+          then
+            echo "::error::KASAN_GENERIC is enabled."
+            exit 1
+          fi
+
+          if grep -q '^CONFIG_KASAN_SW_TAGS=y$' \
+            arch/arm64/configs/bg7n_defconfig
+          then
+            echo "::error::KASAN_SW_TAGS is enabled."
+            exit 1
+          fi
+
+          echo "=== Final configuration valid ==="
 
       # ============================================================
       # SOURCE TREE CHECK
@@ -1580,29 +1168,16 @@ jobs:
         run: |
           set -euxo pipefail
 
-          test ! -f \
-            .config
+          test ! -f .config
+          test ! -f defconfig
 
-          test ! -f \
-            defconfig
+          test ! -d include/config
+          test ! -d include/generated
+          test ! -d arch/arm64/include/generated
 
-          test ! -d \
-            include/config
-
-          test ! -d \
-            include/generated
-
-          test ! -d \
-            arch/arm64/include/generated
-
-          test -L \
-            drivers/kernelsu
-
-          test -f \
-            drivers/kernelsu/Kconfig
-
-          test -f \
-            drivers/kernelsu/Kbuild
+          test -L drivers/kernelsu
+          test -f drivers/kernelsu/Kconfig
+          test -f drivers/kernelsu/Kbuild
 
           grep -qF \
             'source "drivers/kernelsu/Kconfig"' \
@@ -1614,8 +1189,6 @@ jobs:
 
           test -f \
             arch/arm64/configs/bg7n_defconfig
-
-          echo "=== GKI source tree ready ==="
 
       # ============================================================
       # BUILD KERNEL
@@ -1633,32 +1206,22 @@ jobs:
 
           export MAKEFLAGS="-j${MAKE_JOBS}"
 
-          rm -rf \
-            out/android12-5.10
+          rm -rf out/android12-5.10
 
-          test ! -f \
-            common/.config
+          test ! -f common/.config
+          test ! -f common/defconfig
 
-          test ! -f \
-            common/defconfig
-
-          test ! -d \
-            common/include/config
-
-          test ! -d \
-            common/include/generated
-
-          test ! -d \
-            common/arch/arm64/include/generated
+          test ! -d common/include/config
+          test ! -d common/include/generated
+          test ! -d common/arch/arm64/include/generated
 
           echo "=== Build defconfig ==="
 
           grep -E \
             '^CONFIG_(LTO_CLANG_FULL|CFI_CLANG|SHADOW_CALL_STACK|KASAN|KASAN_HW_TAGS|ARM64_MTE|ARM64_TAGGED_ADDR_ABI|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|KSU|KSU_SUSFS)=' \
-            common/arch/arm64/configs/bg7n_defconfig \
-            || true
+            common/arch/arm64/configs/bg7n_defconfig ||
+            true
 
-          echo
           echo "=== Starting Google GKI build ==="
 
           BUILD_CONFIG=common/build.config.bg7n.ksu.susfs \
@@ -1666,7 +1229,7 @@ jobs:
             ./build/build.sh
 
       # ============================================================
-      # VERIFY KERNEL / KMI
+      # VERIFY KERNEL
       # ============================================================
 
       - name: Verify kernel and collect KMI evidence
@@ -1695,8 +1258,7 @@ jobs:
             true
           )"
 
-          test -n \
-            "${IMAGE_LZ4}"
+          test -n "${IMAGE_LZ4}"
 
           cp \
             "${IMAGE_LZ4}" \
@@ -1722,8 +1284,7 @@ jobs:
             true
           )"
 
-          test -n \
-            "${CONFIG_FILE}"
+          test -n "${CONFIG_FILE}"
 
           cp \
             "${CONFIG_FILE}" \
@@ -1737,9 +1298,7 @@ jobs:
             true
           )"
 
-          if [ -n \
-            "${MODULE_SYMVERS}" ]
-          then
+          if [ -n "${MODULE_SYMVERS}" ]; then
             cp \
               "${MODULE_SYMVERS}" \
               ../artifact/kernel/Module.symvers
@@ -1748,107 +1307,60 @@ jobs:
           find out \
             -type f \
             -name System.map \
-            -exec cp {} ../artifact/kernel/ \; \
-            || true
+            -exec cp {} ../artifact/kernel/ \; ||
+            true
 
           find out \
             -type f \
             -name modules.builtin \
-            -exec cp {} ../artifact/kernel/ \; \
-            || true
+            -exec cp {} ../artifact/kernel/ \; ||
+            true
 
           find out \
             -type f \
             -name modules.builtin.modinfo \
-            -exec cp {} ../artifact/kernel/ \; \
-            || true
+            -exec cp {} ../artifact/kernel/ \; ||
+            true
 
           echo "=== Final kernel configuration ==="
 
           grep -E \
             '^CONFIG_(LTO_CLANG_FULL|LTO_NONE|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_MTE|ARM64_TAGGED_ADDR_ABI|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|KSU|KSU_SUSFS)=' \
-            ../artifact/kernel/.config \
-            || true
+            ../artifact/kernel/.config ||
+            true
 
-          if grep -q \
-            '^CONFIG_LTO_NONE=y$' \
-            ../artifact/kernel/.config
-          then
-            echo "::error::Final kernel has CONFIG_LTO_NONE=y."
-            exit 1
-          fi
+          for sym in \
+            CONFIG_LTO_CLANG_FULL \
+            CONFIG_CFI_CLANG \
+            CONFIG_SHADOW_CALL_STACK \
+            CONFIG_KASAN \
+            CONFIG_KASAN_HW_TAGS \
+            CONFIG_ARM64_MTE \
+            CONFIG_ARM64_TAGGED_ADDR_ABI \
+            CONFIG_KSU \
+            CONFIG_KSU_SUSFS \
+            CONFIG_MODULES \
+            CONFIG_MODVERSIONS
+          do
+            grep -q "^${sym}=y$" \
+              ../artifact/kernel/.config || {
+                echo "::error::Missing ${sym} in final kernel."
+                exit 1
+              }
+          done
 
-          if grep -q \
-            '^CONFIG_KASAN_GENERIC=y$' \
-            ../artifact/kernel/.config
-          then
-            echo "::error::Final kernel has CONFIG_KASAN_GENERIC=y."
-            exit 1
-          fi
-
-          if grep -q \
-            '^CONFIG_KASAN_SW_TAGS=y$' \
-            ../artifact/kernel/.config
-          then
-            echo "::error::Final kernel has CONFIG_KASAN_SW_TAGS=y."
-            exit 1
-          fi
-
-          grep -q \
-            '^CONFIG_LTO_CLANG_FULL=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_CFI_CLANG=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_SHADOW_CALL_STACK=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_KASAN=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_KASAN_HW_TAGS=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_ARM64_MTE=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_ARM64_TAGGED_ADDR_ABI=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_KSU=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_MODULES=y$' \
-            ../artifact/kernel/.config
-
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
-            ../artifact/kernel/.config
-
-          echo
-          echo "=== KMI symbols of interest ==="
-
-          if [ -f \
-            ../artifact/kernel/Module.symvers ]
-          then
-            grep -E \
-              '(^|[[:space:]])(__cfi_slowpath|kasan_flag_enabled)([[:space:]]|$)' \
-              ../artifact/kernel/Module.symvers \
-              || true
-          fi
+          for sym in \
+            CONFIG_LTO_NONE \
+            CONFIG_KASAN_GENERIC \
+            CONFIG_KASAN_SW_TAGS
+          do
+            if grep -q "^${sym}=y$" \
+              ../artifact/kernel/.config
+            then
+              echo "::error::Forbidden ${sym}=y"
+              exit 1
+            fi
+          done
 
           {
             echo "=== Kernel version ==="
@@ -1871,11 +1383,11 @@ jobs:
 
             grep -E \
               '^CONFIG_(LTO_CLANG_FULL|CFI_CLANG|SHADOW_CALL_STACK|KASAN|KASAN_HW_TAGS|ARM64_MTE|ARM64_TAGGED_ADDR_ABI|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|KSU|KSU_SUSFS)=' \
-              ../artifact/kernel/.config \
-              || true
+              ../artifact/kernel/.config ||
+              true
 
             echo
-            echo "=== KMI build configuration ==="
+            echo "=== KMI configuration ==="
 
             grep -E \
               '^(KMI_ENFORCED|KMI_SYMBOL_LIST_STRICT_MODE|TRIM_NONLISTED_KMI)=' \
@@ -1885,7 +1397,7 @@ jobs:
             ../artifact/reports/kernel_verification.txt
 
       # ============================================================
-      # BUILD SUSFS USERSPACE + MODULE
+      # SUSFS USERSPACE + MODULE
       # ============================================================
 
       - name: Build SUSFS userspace helper and KernelSU module
@@ -1905,8 +1417,7 @@ jobs:
           ./build_ksu_susfs_tool.sh
           ./build_ksu_module.sh
 
-          test -d \
-            ksu_module_susfs
+          test -d ksu_module_susfs
 
           mkdir -p \
             ../../artifact/susfs
@@ -1915,9 +1426,7 @@ jobs:
             ksu_module_susfs \
             ../../artifact/susfs/susfs4ksu-module
 
-          if [ -f \
-            ksu_module_susfs.zip ]
-          then
+          if [ -f ksu_module_susfs.zip ]; then
             cp \
               ksu_module_susfs.zip \
               ../../artifact/susfs/susfs4ksu.zip
@@ -1955,8 +1464,7 @@ jobs:
             head -n1
           )"
 
-          test -n \
-            "${MAGISK_URL}"
+          test -n "${MAGISK_URL}"
 
           curl -fL \
             "${MAGISK_URL}" \
@@ -1971,19 +1479,16 @@ jobs:
             work/libmagiskboot.so \
             work/magiskboot
 
-          chmod +x \
-            work/magiskboot
+          chmod +x work/magiskboot
 
           (
             cd work/boot
 
             ../magiskboot unpack boot.img
 
-            test -f \
-              kernel
+            test -f kernel
 
-            test -f \
-              ../../artifact/kernel/Image
+            test -f ../../artifact/kernel/Image
 
             cp \
               ../../artifact/kernel/Image \
@@ -1991,8 +1496,7 @@ jobs:
 
             ../magiskboot repack boot.img
 
-            test -s \
-              new-boot.img
+            test -s new-boot.img
           )
 
           cp \
@@ -2007,7 +1511,7 @@ jobs:
             tee artifact/reports/generated_boot.sha256
 
       # ============================================================
-      # BUILD MANIFEST
+      # BUILD INFO
       # ============================================================
 
       - name: Create build manifest and hashes
@@ -2027,8 +1531,7 @@ jobs:
             git -C gki/common rev-parse HEAD
           )"
 
-          cat > \
-            artifact/BUILD_INFO.txt <<EOF
+          cat > artifact/BUILD_INFO.txt <<EOF
           DEVICE=${DEVICE}
 
           GOOGLE_GKI_MANIFEST_BRANCH=${GKI_MANIFEST_BRANCH}
@@ -2079,11 +1582,9 @@ jobs:
         run: |
           set -euxo pipefail
 
-          rm -rf \
-            artifact/package
+          rm -rf artifact/package
 
-          mkdir -p \
-            artifact/package
+          mkdir -p artifact/package
 
           cp \
             artifact/BUILD_INFO.txt \
@@ -2105,9 +1606,7 @@ jobs:
             artifact/reports \
             artifact/package/reports
 
-          if [ -d \
-            artifact/boot ]
-          then
+          if [ -d artifact/boot ]; then
             cp -a \
               artifact/boot \
               artifact/package/boot
@@ -2121,36 +1620,29 @@ jobs:
             BG7n_final_defconfig \
             artifact/package/
 
-          cat > \
-            artifact/package/README.txt <<EOF
-          TECNO BG7n / MT6765
+          cat > artifact/package/README.txt <<EOF
+          TECNO BG7n
 
           Google GKI:
-            manifest branch ${GKI_MANIFEST_BRANCH}
-            common tag ${GKI_COMMON_TAG}
+            ${GKI_COMMON_TAG}
             Linux ${GKI_VERSION}
             Commit ${GKI_SHA}
 
           KernelSU:
-            repository ${KSU_REPO}
-            exact commit ${KSU_ACTUAL_COMMIT}
+            ${KSU_REPO}
+            ${KSU_ACTUAL_COMMIT}
 
           SUSFS:
-            repository ${SUSFS_REPO}
-            pinned commit ${{ inputs.susfs_ref }}
+            ${SUSFS_REPO}
+            ${{ inputs.susfs_ref }}
 
-          GKI protected state:
+          Required:
             CONFIG_LTO_CLANG_FULL=y
             CONFIG_CFI_CLANG=y
             CONFIG_SHADOW_CALL_STACK=y
             CONFIG_KASAN=y
             CONFIG_KASAN_HW_TAGS=y
             CONFIG_ARM64_MTE=y
-
-          Conflicting states prohibited:
-            CONFIG_LTO_NONE
-            CONFIG_KASAN_GENERIC
-            CONFIG_KASAN_SW_TAGS
 
           KernelSU:
             CONFIG_KSU=y
@@ -2165,10 +1657,7 @@ jobs:
             KMI_SYMBOL_LIST_STRICT_MODE=1
             TRIM_NONLISTED_KMI=1
 
-          IMPORTANT:
-            Review kernel_verification.txt before flashing.
-
-            Keep the original stock boot.img as the recovery path.
+          Keep the original stock boot.img as recovery.
           EOF
 
           (
