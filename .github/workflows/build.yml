@@ -306,55 +306,98 @@ jobs:
           git -C KernelSU status --short
           echo "GKI changed files:"
           git -C common status --short
-      - name: Generate BG7n KSU + SUSFS defconfig
+      - name: Generate normalized BG7n KSU + SUSFS defconfig
         shell: bash
         working-directory: gki/common
         run: |
           set -euxo pipefail
 
-          echo "Using stock config: ${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
-          sha256sum "${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
+          STOCK_CONFIG="${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
+          test -s "${STOCK_CONFIG}"
 
-          # The stock config lives in the repository root. Copy it into the
-          # kernel source tree before generating the final defconfig.
-          test -s "${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
-          cp "${GITHUB_WORKSPACE}/BG7n_stock_defconfig"             arch/arm64/configs/bg7n_stock_defconfig
+          echo "=== Source stock config ==="
+          sha256sum "${STOCK_CONFIG}"
 
-          cp arch/arm64/configs/bg7n_stock_defconfig             arch/arm64/configs/bg7n_defconfig
+          # The uploaded BG7n_stock_defconfig is a complete .config-style file,
+          # not a minimal savedefconfig.  First normalize it against this exact
+          # Google GKI source, then add KSU/SUSFS and normalize again.
+          cp "${STOCK_CONFIG}" .config
 
-          cat >> arch/arm64/configs/bg7n_defconfig <<'CFG'
+          make ARCH=arm64 olddefconfig
+          make ARCH=arm64 savedefconfig
 
-          # KernelSU / SUSFS
-          CONFIG_KSU=y
-          CONFIG_KSU_SUSFS=y
+          cp defconfig /tmp/bg7n_stock_normalized_defconfig
 
-          # Required module/KMI baseline
-          CONFIG_MODULES=y
-          CONFIG_MODVERSIONS=y
-          CONFIG_KALLSYMS=y
-          CONFIG_KALLSYMS_ALL=y
-          CONFIG_OVERLAY_FS=y
-          CFG
+          echo "=== Normalized stock baseline ==="
+          grep -E '^(CONFIG_(MODULES|MODVERSIONS|KALLSYMS|LTO_CLANG|CFI_CLANG|OVERLAY_FS))=' \
+            /tmp/bg7n_stock_normalized_defconfig || true
 
+          # Add only features known to be provided by the patched KSU/SUSFS tree.
+          {
+            cat /tmp/bg7n_stock_normalized_defconfig
+            echo
+            echo "# KernelSU / SUSFS"
+            echo "CONFIG_KSU=y"
+            echo "CONFIG_KSU_SUSFS=y"
+            echo
+            echo "# Required module/KMI baseline"
+            echo "CONFIG_MODULES=y"
+            echo "CONFIG_MODVERSIONS=y"
+            echo "CONFIG_KALLSYMS=y"
+            echo "CONFIG_KALLSYMS_ALL=y"
+            echo "CONFIG_OVERLAY_FS=y"
+          } > /tmp/bg7n_with_ksu.conf
+
+          # Enable every actual KSU_SUSFS_* boolean/tristate entry exposed by
+          # the patched KernelSU Kconfig.  Let Kconfig resolve dependencies.
           while read -r sym; do
             case "${sym}" in
               KSU_SUSFS*)
-                echo "CONFIG_${sym}=y" >> arch/arm64/configs/bg7n_defconfig
+                echo "CONFIG_${sym}=y" >> /tmp/bg7n_with_ksu.conf
                 ;;
             esac
           done < <(
-            grep -RhoE '^config[[:space:]]+KSU_SUSFS[A-Z0-9_]*'               ../../KernelSU/kernel ../../common/fs ../../common/include/linux               2>/dev/null |
+            grep -RhoE '^config[[:space:]]+KSU_SUSFS[A-Z0-9_]*' \
+              ../../KernelSU/kernel \
+              2>/dev/null |
             awk '{print $2}' |
             sort -u
           )
 
-          tac arch/arm64/configs/bg7n_defconfig |
-            awk '!seen[$0]++' |
-            tac > /tmp/bg7n_defconfig.clean
-          mv /tmp/bg7n_defconfig.clean arch/arm64/configs/bg7n_defconfig
+          cp /tmp/bg7n_with_ksu.conf .config
 
-          grep -RhsE '^config[[:space:]]+KSU(_SUSFS)?'             ../../KernelSU/kernel ../../common/fs ../../common/include/linux             2>/dev/null | head -100 || true
+          # Resolve all dependencies and produce a canonical minimal defconfig.
+          make ARCH=arm64 olddefconfig
+          make ARCH=arm64 savedefconfig
 
+          mkdir -p arch/arm64/configs
+          cp defconfig arch/arm64/configs/bg7n_defconfig
+
+          echo "=== Final canonical defconfig ==="
+          grep '^CONFIG_KSU' arch/arm64/configs/bg7n_defconfig || true
+          grep -E '^CONFIG_(MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS)=' \
+            arch/arm64/configs/bg7n_defconfig || true
+
+          # Re-expand the canonical defconfig and re-save it.  This is the exact
+          # form expected by Google's GKI build/defconfig verification.
+          make ARCH=arm64 bg7n_defconfig
+          cp .config /tmp/bg7n_expanded.config
+          make ARCH=arm64 savedefconfig
+          cmp -s defconfig arch/arm64/configs/bg7n_defconfig || {
+            echo "::error::Canonical savedefconfig is not stable."
+            diff -u arch/arm64/configs/bg7n_defconfig defconfig || true
+            exit 1
+          }
+
+          # Verify the final expanded configuration too.
+          for sym in CONFIG_KSU CONFIG_KSU_SUSFS CONFIG_MODULES CONFIG_MODVERSIONS; do
+            grep -q "^${sym}=y$" /tmp/bg7n_expanded.config || {
+              echo "::error::Missing ${sym} after defconfig expansion"
+              exit 1
+            }
+          done
+
+          echo "=== Defconfig normalization passed ==="
       - name: Prepare GKI build config
         shell: bash
         working-directory: gki/common
