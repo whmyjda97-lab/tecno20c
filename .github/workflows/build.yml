@@ -24,7 +24,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GKI_TAG: android12-5.10-2025-06_r3
+  # The release tag exists in kernel/common, not in kernel/manifest.
+  # Therefore repo-init uses the dated manifest branch, then common is pinned
+  # explicitly to the exact r3 tag/commit.
+  GKI_MANIFEST_BRANCH: common-android12-5.10-2025-06
+  GKI_COMMON_TAG: android12-5.10-2025-06_r3
   GKI_VERSION: "5.10.237"
   GKI_SHA: d09ef2e980e0974a0d6dfe762e29fff118db7f46
   KSU_TAG: v3.2.5
@@ -174,20 +178,32 @@ jobs:
           mkdir -p gki
           cd gki
 
-          repo init             -u https://android.googlesource.com/kernel/manifest             -b "${GKI_TAG}"             --depth=1
+          # IMPORTANT:
+          # android12-5.10-2025-06_r3 is a tag in kernel/common, while
+          # kernel/manifest exposes the dated manifest as a branch.
+          repo init             -u https://android.googlesource.com/kernel/manifest             -b "${GKI_MANIFEST_BRANCH}"             --depth=1
+
           repo sync -c -j2 --no-tags --no-clone-bundle
 
           test -d common
           test -f common/Makefile
 
+          # Pin only kernel/common to the exact r3 release tag.
+          git -C common fetch --no-tags origin             "refs/tags/${GKI_COMMON_TAG}:refs/tags/${GKI_COMMON_TAG}"
+
+          git -C common checkout --detach "${GKI_COMMON_TAG}"
+
           COMMON_COMMIT="$(git -C common rev-parse HEAD)"
+          echo "COMMON_COMMIT=${COMMON_COMMIT}"
+
           test "${COMMON_COMMIT}" = "${GKI_SHA}"
           test "$(make -s -C common kernelversion)" = "${GKI_VERSION}"
 
           repo manifest -r > manifest.lock.xml
 
           {
-            echo "GKI_TAG=${GKI_TAG}"
+            echo "GKI_MANIFEST_BRANCH=${GKI_MANIFEST_BRANCH}"
+            echo "GKI_COMMON_TAG=${GKI_COMMON_TAG}"
             echo "GKI_VERSION=${GKI_VERSION}"
             echo "GKI_SHA=${GKI_SHA}"
             echo "COMMON_COMMIT=${COMMON_COMMIT}"
@@ -472,7 +488,8 @@ jobs:
 
           cat > artifact/BUILD_INFO.txt <<EOF
           DEVICE=${DEVICE}
-          GOOGLE_GKI_TAG=${GKI_TAG}
+          GOOGLE_GKI_MANIFEST_BRANCH=${GKI_MANIFEST_BRANCH}
+          GOOGLE_GKI_COMMON_TAG=${GKI_COMMON_TAG}
           GOOGLE_GKI_VERSION=${GKI_VERSION}
           GOOGLE_GKI_SHA=${GKI_SHA}
           COMMON_COMMIT=${COMMON_COMMIT}
@@ -516,7 +533,8 @@ jobs:
           TECNO BG7n / MT6765
 
           Google GKI:
-            ${GKI_TAG}
+            manifest branch ${GKI_MANIFEST_BRANCH}
+            common tag ${GKI_COMMON_TAG}
             Linux ${GKI_VERSION}
             Commit ${GKI_SHA}
 
