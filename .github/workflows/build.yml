@@ -18,116 +18,43 @@ jobs:
       - name: Install build dependencies
         run: |
           set -euo pipefail
-
           sudo apt-get update
-
           sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            ccache \
-            clang \
-            flex \
-            gcc-aarch64-linux-gnu \
-            git \
-            libelf-dev \
-            libssl-dev \
-            lld \
-            llvm \
-            python3 \
-            rsync \
-            unzip \
-            wget \
-            curl \
-            xz-utils \
-            zstd \
-            file \
-            device-tree-compiler
+            bc bison build-essential ccache clang flex \
+            gcc-aarch64-linux-gnu git libelf-dev libssl-dev \
+            lld llvm python3 rsync unzip wget curl xz-utils zstd \
+            file device-tree-compiler zip
 
-      - name: Verify project files
+      - name: Verify project files and hashes
         run: |
           set -euo pipefail
 
-          required_files=(
-            "KernelSU-Next.tar.gz"
-            "susfs4ksu-gki-android12-5.10.tar.gz"
-            "stock.config"
-            "50_add_susfs_in_gki-android12-5.10.patch"
-            "patches-susfs-bg7n-legacy-reference.patch"
-            ".github/workflows/build.yml"
-          )
+          test -s KernelSU-Next.tar.gz
+          test -s susfs4ksu-gki-android12-5.10.tar.gz
+          test -s stock.config
+          test -s 50_add_susfs_in_gki-android12-5.10.patch
+          test -s patches-susfs-bg7n-legacy-reference.patch
 
-          for f in "${required_files[@]}"; do
-            if [ ! -s "$f" ]; then
-              echo "Missing or empty file: $f"
-              exit 1
-            fi
-          done
+          test "$(sha256sum KernelSU-Next.tar.gz | cut -d' ' -f1)" = \
+            "f18e75a57446d8f2c115bb5ed353bbc9f226dae485dd31d8e9ae0a215052fe00"
 
-          echo "Project files OK."
+          test "$(sha256sum susfs4ksu-gki-android12-5.10.tar.gz | cut -d' ' -f1)" = \
+            "b01060cb4a55927d755774819d21e0084a98447ae1abec54c6753f3e28e1e7b2"
+
+          test "$(sha256sum stock.config | cut -d' ' -f1)" = \
+            "41b268fa2dba52477e9930183a4ae2a7ab19b98b68cdf5e733cba132e768b2e9"
+
+          test "$(sha256sum 50_add_susfs_in_gki-android12-5.10.patch | cut -d' ' -f1)" = \
+            "9f6c646a537a00d5571a8bb98698d49aca39a6d4a76d5dea322057cb79029966"
+
+          test "$(sha256sum patches-susfs-bg7n-legacy-reference.patch | cut -d' ' -f1)" = \
+            "918a38cf926af522d8cb7afd54e3741ac19ffd17cb1184717c47cb157d4444f5"
 
       - name: Prepare workspace
         run: |
           set -euo pipefail
-
-          rm -rf \
-            kernel \
-            work \
-            out \
-            tools \
-            bootwork \
-            verification
-
-          mkdir -p \
-            work \
-            out \
-            tools \
-            bootwork \
-            verification
-
-      - name: Verify source archives
-        run: |
-          set -euo pipefail
-
-          tar -tzf KernelSU-Next.tar.gz \
-            > verification/kernelsu-files.txt
-
-          tar -tzf susfs4ksu-gki-android12-5.10.tar.gz \
-            > verification/susfs-files.txt
-
-          grep -q '/kernel/setup.sh$' \
-            verification/kernelsu-files.txt
-
-          grep -q '/kernel/Kconfig$' \
-            verification/kernelsu-files.txt
-
-          grep -q '/kernel/Kbuild$' \
-            verification/kernelsu-files.txt
-
-          grep -q \
-            'kernel_patches/fs/susfs.c$' \
-            verification/susfs-files.txt
-
-          grep -q \
-            'kernel_patches/include/linux/susfs.h$' \
-            verification/susfs-files.txt
-
-          echo "Archives are structurally valid."
-
-      - name: Verify official SUSFS patch archive match
-        run: |
-          set -euo pipefail
-
-          tar -xOf \
-            susfs4ksu-gki-android12-5.10.tar.gz \
-            susfs4ksu-gki-android12-5.10/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch \
-            > verification/archive-susfs.patch
-
-          cmp \
-            50_add_susfs_in_gki-android12-5.10.patch \
-            verification/archive-susfs.patch
-
-          echo "Official SUSFS patch matches archive."
+          rm -rf kernel work out tools bootwork verification
+          mkdir -p work out tools bootwork verification
 
       - name: Fetch exact Android common kernel
         env:
@@ -136,7 +63,6 @@ jobs:
           set -euo pipefail
 
           git init kernel
-
           cd kernel
 
           git remote add origin \
@@ -149,31 +75,17 @@ jobs:
 
           git checkout --detach FETCH_HEAD
 
-          ACTUAL_COMMIT="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$KERNEL_COMMIT"
 
-          if [ "$ACTUAL_COMMIT" != "$KERNEL_COMMIT" ]; then
-            echo "Kernel commit mismatch."
-            echo "Expected: $KERNEL_COMMIT"
-            echo "Actual:   $ACTUAL_COMMIT"
-            exit 1
-          fi
+          git rev-parse HEAD \
+            > "$GITHUB_WORKSPACE/verification/kernel-commit.txt"
 
-          cd ..
-
-          echo "$ACTUAL_COMMIT" \
-            > verification/kernel-commit.txt
-
-      - name: Extract bundled sources
+      - name: Extract bundled KernelSU-Next and SUSFS
         run: |
           set -euo pipefail
 
-          tar -xzf \
-            KernelSU-Next.tar.gz \
-            -C work
-
-          tar -xzf \
-            susfs4ksu-gki-android12-5.10.tar.gz \
-            -C work
+          tar -xzf KernelSU-Next.tar.gz -C work
+          tar -xzf susfs4ksu-gki-android12-5.10.tar.gz -C work
 
           KSU_DIR="$(
             find work \
@@ -186,24 +98,13 @@ jobs:
 
           SUSFS_DIR="work/susfs4ksu-gki-android12-5.10"
 
-          if [ -z "$KSU_DIR" ]; then
-            echo "KernelSU-Next directory not found."
-            find work -maxdepth 2 -type d
-            exit 1
-          fi
-
-          if [ ! -d "$SUSFS_DIR" ]; then
-            echo "SUSFS directory not found."
-            exit 1
-          fi
+          test -d "$KSU_DIR"
+          test -d "$SUSFS_DIR"
 
           echo "KSU_DIR=$KSU_DIR" >> "$GITHUB_ENV"
           echo "SUSFS_DIR=$SUSFS_DIR" >> "$GITHUB_ENV"
 
-          echo "KernelSU directory: $KSU_DIR"
-          echo "SUSFS directory:   $SUSFS_DIR"
-
-      - name: Verify bundled KernelSU-Next
+      - name: Verify bundled KernelSU-Next source
         run: |
           set -euo pipefail
 
@@ -211,257 +112,153 @@ jobs:
           test -f "$KSU_DIR/kernel/Kconfig"
           test -f "$KSU_DIR/kernel/Kbuild"
 
-          echo "KernelSU-Next files found."
+          grep -q 'OWNER="pershoot"' \
+            "$KSU_DIR/kernel/setup.sh"
 
-          required_ksu_symbols=(
-            KSU_SUSFS
-            KSU_SUSFS_SUS_PATH
-            KSU_SUSFS_SUS_MOUNT
-            KSU_SUSFS_SUS_KSTAT
-          )
+          for symbol in \
+            KSU_SUSFS \
+            KSU_SUSFS_SUS_PATH \
+            KSU_SUSFS_SUS_MOUNT \
+            KSU_SUSFS_SUS_KSTAT; do
 
-          for symbol in "${required_ksu_symbols[@]}"; do
-            if grep -qE \
-              "^[[:space:]]*config[[:space:]]+$symbol([[:space:]]|$)" \
-              "$KSU_DIR/kernel/Kconfig"; then
-              echo "FOUND: $symbol"
-            else
-              echo "Missing required Kconfig symbol: $symbol"
-              exit 1
-            fi
+            grep -RqsE \
+              --include='Kconfig' \
+              --include='Kconfig.*' \
+              "^[[:space:]]*config[[:space:]]+${symbol}([[:space:]]|$)" \
+              "$KSU_DIR/kernel"
+
           done
 
-          optional_symbols=(
-            KSU_SUSFS_SPOOF_UNAME
-            KSU_SUSFS_ENABLE_LOG
-            KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-            KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-            KSU_SUSFS_OPEN_REDIRECT
-            KSU_SUSFS_SUS_MAP
-          )
-
-          for symbol in "${optional_symbols[@]}"; do
-            if grep -qE \
-              "^[[:space:]]*config[[:space:]]+$symbol([[:space:]]|$)" \
-              "$KSU_DIR/kernel/Kconfig"; then
-              echo "OPTIONAL FOUND: $symbol"
-            else
-              echo "OPTIONAL NOT PRESENT: $symbol"
-            fi
-          done
-
-          if grep -q \
-            'KSU_SUSFS_SUS_KSTAT_REDIRECT' \
-            "$KSU_DIR/kernel/Kconfig"; then
-            echo "WARNING: unexpected legacy SUS_KSTAT_REDIRECT symbol found."
-          else
-            echo "Confirmed: SUS_KSTAT_REDIRECT is not required."
-          fi
-
-      - name: Verify SUSFS source
+      - name: Verify SUSFS v2.2.0 source
         run: |
           set -euo pipefail
-
-          test -f \
-            "$SUSFS_DIR/kernel_patches/fs/susfs.c"
-
-          test -f \
-            "$SUSFS_DIR/kernel_patches/include/linux/susfs.h"
-
-          test -f \
-            "$SUSFS_DIR/kernel_patches/include/linux/susfs_def.h"
 
           grep -Fq \
             '#define SUSFS_VERSION "v2.2.0"' \
             "$SUSFS_DIR/kernel_patches/include/linux/susfs.h"
 
-          echo "SUSFS v2.2.0 verified."
+          test -f \
+            "$SUSFS_DIR/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch"
 
-      - name: Install bundled KernelSU-Next
+          test -f \
+            "$SUSFS_DIR/build_ksu_susfs_tool.sh"
+
+          test -f \
+            "$SUSFS_DIR/build_ksu_module.sh"
+
+      - name: Verify legacy patch relationship
         run: |
           set -euo pipefail
 
-          cd kernel
-
-          bash \
-            "$GITHUB_WORKSPACE/$KSU_DIR/kernel/setup.sh"
-
-          test -d drivers/kernelsu
-
-          echo "KernelSU-Next installed."
-
-      - name: Verify KernelSU installation
-        run: |
-          set -euo pipefail
-
-          test -f kernel/drivers/kernelsu/Kconfig \
-            || test -f drivers/kernelsu/Kconfig
-
-          if [ -d drivers/kernelsu ]; then
-            KSU_KERNEL_DIR="drivers/kernelsu"
-          else
-            KSU_KERNEL_DIR="kernel/drivers/kernelsu"
-          fi
-
-          echo "KSU kernel directory: $KSU_KERNEL_DIR"
-
-      - name: Select BG7n patch
-        run: |
-          set -euo pipefail
-
-          PATCH="patches-susfs-bg7n-legacy-reference.patch"
-
-          if [ ! -s "$PATCH" ]; then
-            echo "BG7n patch is missing."
-            exit 1
-          fi
-
-          cp \
-            "$PATCH" \
-            verification/bg7n-original.patch
-
-          echo "BG7N_PATCH=$GITHUB_WORKSPACE/$PATCH" \
-            >> "$GITHUB_ENV"
-
-      - name: Build clean BG7n patch
-        run: |
-          set -euo pipefail
-
-          python3 - \
-            "$GITHUB_WORKSPACE/verification/bg7n-original.patch" \
-            "$GITHUB_WORKSPACE/verification/bg7n-clean.patch" <<'PY'
+          python3 - "$GITHUB_WORKSPACE/patches-susfs-bg7n-legacy-reference.patch" \
+            "$GITHUB_WORKSPACE/50_add_susfs_in_gki-android12-5.10.patch" \
+            "$GITHUB_WORKSPACE/verification/legacy-patch-report.txt" <<'PY'
+          import re
           import sys
 
-          src = sys.argv[1]
-          dst = sys.argv[2]
+          legacy, official, report = sys.argv[1:4]
 
-          with open(src, "r", encoding="utf-8", errors="replace") as f:
+          with open(legacy, "r", encoding="utf-8", errors="replace") as f:
               lines = f.readlines()
 
-          output = []
-          removed_sections = 0
-          i = 0
+          paths = []
+          orig = []
 
-          while i < len(lines):
-              if lines[i].startswith("diff --git "):
-                  start = i
-                  j = i + 1
+          for line in lines:
+              if line.startswith("--- ") or line.startswith("+++ "):
+                  parts = line.split()
+                  if len(parts) >= 2:
+                      p = parts[1]
+                      if p.endswith(".orig"):
+                          orig.append(p)
+                      else:
+                          paths.append(p)
 
-                  old_path = None
-                  new_path = None
+          with open(official, "r", encoding="utf-8", errors="replace") as f:
+              off = f.read()
 
-                  while j < len(lines):
-                      if lines[j].startswith("diff --git "):
-                          break
-
-                      if lines[j].startswith("--- "):
-                          old_path = lines[j][4:].strip()
-                          old_path = old_path.split("\t", 1)[0]
-                          old_path = old_path.split(" ", 1)[0]
-
-                      if lines[j].startswith("+++ "):
-                          new_path = lines[j][4:].strip()
-                          new_path = new_path.split("\t", 1)[0]
-                          new_path = new_path.split(" ", 1)[0]
-
-                      j += 1
-
-                  old_clean = (old_path or "").removeprefix("a/")
-                  new_clean = (new_path or "").removeprefix("b/")
-
-                  if (
-                      old_clean.endswith(".orig")
-                      or new_clean.endswith(".orig")
-                  ):
-                      removed_sections += 1
-                  else:
-                      output.extend(lines[start:j])
-
-                  i = j
-                  continue
-
-              output.append(lines[i])
-              i += 1
-
-          if not output:
-              raise SystemExit("Cleaned patch is empty.")
-
-          with open(dst, "w", encoding="utf-8") as f:
-              f.writelines(output)
-
-          print(
-              "Removed .orig sections:",
-              removed_sections
+          official_paths = set(
+              re.findall(r'^diff --git a/(.*?) b/(.*?)$', off, re.M)
           )
-          print(
-              "Clean patch lines:",
-              len(output)
+
+          normalized = set()
+          for p in paths:
+              p = p.replace("pristine_bg7n/", "")
+              p = p.replace("work_susfs/", "")
+              normalized.add(p)
+
+          overlap = sorted(
+              p for p in normalized
+              if any(p == a or p == b for a, b in official_paths)
           )
-          PY
 
-          test -s verification/bg7n-clean.patch
+          with open(report, "w", encoding="utf-8") as f:
+              f.write(f"legacy_non_orig_paths={len(normalized)}\n")
+              f.write(f"legacy_orig_entries={len(orig)}\n")
+              f.write(f"overlap_with_official_patch={len(overlap)}\n")
+              for p in overlap:
+                  f.write(f"overlap={p}\n")
 
-      - name: Verify BG7n patch applies cleanly
+          # The legacy patch is a combined snapshot, not an additional
+          # patch to apply on top of the official SUSFS patch.
+          if len(overlap) < 20:
+              raise SystemExit("Unexpected legacy/official relationship")
+
+          if len(orig) == 0:
+              raise SystemExit("Expected .orig entries not found")
+
+      - name: Integrate bundled KernelSU-Next locally
         run: |
           set -euo pipefail
 
-          cd kernel
+          KSU_ROOT="$GITHUB_WORKSPACE/$KSU_DIR"
 
-          patch \
-            --dry-run \
-            --batch \
-            --forward \
-            --no-backup-if-mismatch \
-            -p1 \
-            < "$GITHUB_WORKSPACE/verification/bg7n-clean.patch" \
-            > "$GITHUB_WORKSPACE/verification/bg7n-dry-run.log" \
-            2>&1
+          rm -rf \
+            "$GITHUB_WORKSPACE/kernel/KernelSU-Next"
 
-          cat \
-            "$GITHUB_WORKSPACE/verification/bg7n-dry-run.log"
+          cp -a \
+            "$KSU_ROOT" \
+            "$GITHUB_WORKSPACE/kernel/KernelSU-Next"
 
-          if grep -Eq \
-            'FAILED|Reversed|Skipping patch|ignored|Assume -R' \
-            "$GITHUB_WORKSPACE/verification/bg7n-dry-run.log"; then
-            echo "BG7n patch did not apply cleanly."
-            exit 1
+          cd "$GITHUB_WORKSPACE/kernel"
+
+          test -d KernelSU-Next/kernel
+
+          rm -f drivers/kernelsu
+
+          ln -s \
+            "../KernelSU-Next/kernel" \
+            drivers/kernelsu
+
+          grep -q \
+            'obj-$(CONFIG_KSU) += kernelsu/' \
+            drivers/Makefile \
+            || printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+
+          if ! grep -qF \
+            'source "drivers/kernelsu/Kconfig"' \
+            drivers/Kconfig; then
+            sed -i \
+              '/endmenu/i\\source "drivers/kernelsu/Kconfig"' \
+              drivers/Kconfig
           fi
 
-          echo "BG7n patch dry-run succeeded."
+          test -L drivers/kernelsu
+          test -f KernelSU-Next/kernel/Kconfig
+          test -f KernelSU-Next/kernel/Kbuild
 
-      - name: Apply BG7n patch
+      - name: Apply official SUSFS GKI 5.10 patch
         run: |
           set -euo pipefail
 
-          cd kernel
+          cd "$GITHUB_WORKSPACE/kernel"
 
           patch \
             --batch \
             --forward \
-            --no-backup-if-mismatch \
             -p1 \
-            < "$GITHUB_WORKSPACE/verification/bg7n-clean.patch"
-
-          if find . \
-            \( \
-              -name '*.rej' \
-              -o -name '*.orig' \
-            \) \
-            -print -quit \
-            | grep -q .; then
-
-            echo "Patch created reject or backup files:"
-            find . \
-              \( \
-                -name '*.rej' \
-                -o -name '*.orig' \
-              \) \
-              -print
-
-            exit 1
-          fi
-
-          echo "BG7n patch applied."
+            -F3 \
+            < "$GITHUB_WORKSPACE/50_add_susfs_in_gki-android12-5.10.patch"
 
       - name: Install SUSFS source files
         run: |
@@ -483,115 +280,41 @@ jobs:
           test -s kernel/include/linux/susfs.h
           test -s kernel/include/linux/susfs_def.h
 
-      - name: Verify SUSFS integration
-        run: |
-          set -euo pipefail
-
           grep -Fq \
-            'obj-$(CONFIG_KSU_SUSFS) += susfs.o' \
-            kernel/fs/Makefile
-
-          grep -Fq \
-            'SUSFS_VERSION "v2.2.0"' \
+            '#define SUSFS_VERSION "v2.2.0"' \
             kernel/include/linux/susfs.h
 
-          echo "SUSFS integration verified."
-
-      - name: Verify final source tree
-        run: |
-          set -euo pipefail
-
-          test -s kernel/fs/susfs.c
-          test -s kernel/include/linux/susfs.h
-          test -s kernel/include/linux/susfs_def.h
-          test -d kernel/drivers/kernelsu
-
-          if find kernel \
-            \( \
-              -name '*.rej' \
-              -o -name '*.orig' \
-            \) \
-            -print -quit \
-            | grep -q .; then
-
-            echo "Unexpected patch residue:"
-            find kernel \
-              \( \
-                -name '*.rej' \
-                -o -name '*.orig' \
-              \) \
-              -print
-
-            exit 1
-          fi
-
-          echo "Final source tree is clean."
+          grep -q \
+            'obj-$(CONFIG_KSU_SUSFS) += susfs.o' \
+            kernel/fs/Makefile
 
       - name: Prepare kernel config
         run: |
           set -euo pipefail
 
-          test -s stock.config
+          chmod +x kernel/scripts/config
 
           cp \
             stock.config \
             out/.config
 
-          test -x kernel/scripts/config \
-            || chmod +x kernel/scripts/config
+          C=kernel/scripts/config
+          CFG=out/.config
 
-          kernel/scripts/config \
-            --file out/.config \
-            --enable CONFIG_KSU
-
-          kernel/scripts/config \
-            --file out/.config \
-            --enable CONFIG_KSU_SUSFS
-
-          kernel/scripts/config \
-            --file out/.config \
-            --enable CONFIG_KSU_SUSFS_SUS_PATH
-
-          kernel/scripts/config \
-            --file out/.config \
-            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-
-          kernel/scripts/config \
-            --file out/.config \
-            --enable CONFIG_KSU_SUSFS_SUS_KSTAT
-
-          optional_configs=(
-            CONFIG_KSU_SUSFS_SPOOF_UNAME
-            CONFIG_KSU_SUSFS_ENABLE_LOG
-            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-            CONFIG_KSU_SUSFS_OPEN_REDIRECT
-            CONFIG_KSU_SUSFS_SUS_MAP
-          )
-
-          for config in "${optional_configs[@]}"; do
-            if grep -qE \
-              "^[[:space:]]*config[[:space:]]+${config#CONFIG_}([[:space:]]|$)" \
-              "$KSU_DIR/kernel/Kconfig"; then
-
-              kernel/scripts/config \
-                --file out/.config \
-                --enable "$config" \
-                || true
-            fi
-          done
-
-          kernel/scripts/config \
-            --file out/.config \
-            --disable CONFIG_TRIM_UNUSED_KSYMS \
-            || true
-
-          kernel/scripts/config \
-            --file out/.config \
-            --disable CONFIG_UNUSED_KSYMS \
-            || true
-
-          echo "Kernel configuration prepared."
+          "$C" --file "$CFG" --enable CONFIG_THREAD_INFO_IN_TASK
+          "$C" --file "$CFG" --enable CONFIG_KSU
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_PATH
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_ENABLE_LOG
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
+          "$C" --file "$CFG" --enable CONFIG_KSU_SUSFS_SUS_MAP
+          "$C" --file "$CFG" --disable CONFIG_TRIM_UNUSED_KSYMS || true
+          "$C" --file "$CFG" --disable CONFIG_UNUSED_KSYMS || true
 
       - name: Resolve final Kconfig
         run: |
@@ -609,38 +332,39 @@ jobs:
         run: |
           set -euo pipefail
 
-          required_config=(
-            CONFIG_KSU
-            CONFIG_KSU_SUSFS
-            CONFIG_KSU_SUSFS_SUS_PATH
-            CONFIG_KSU_SUSFS_SUS_MOUNT
-            CONFIG_KSU_SUSFS_SUS_KSTAT
-          )
+          CFG=out/.config
 
-          for config in "${required_config[@]}"; do
-            if ! grep -qx "${config}=y" out/.config; then
-              echo "Required config is not enabled: $config"
-              grep "^${config}" out/.config || true
-              exit 1
-            fi
+          for symbol in \
+            CONFIG_THREAD_INFO_IN_TASK \
+            CONFIG_KSU \
+            CONFIG_KSU_SUSFS \
+            CONFIG_KSU_SUSFS_SUS_PATH \
+            CONFIG_KSU_SUSFS_SUS_MOUNT \
+            CONFIG_KSU_SUSFS_SUS_KSTAT \
+            CONFIG_KSU_SUSFS_SPOOF_UNAME \
+            CONFIG_KSU_SUSFS_ENABLE_LOG \
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT \
+            CONFIG_KSU_SUSFS_SUS_MAP; do
+
+            grep -qx "${symbol}=y" "$CFG" \
+              || {
+                echo "Missing or disabled: $symbol"
+                exit 1
+              }
           done
 
-          if grep -q \
-            '^CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y' \
-            out/.config; then
-
-            echo "Unexpected obsolete SUS_KSTAT_REDIRECT detected."
+          if grep -q '^CONFIG_KSU_SUSFS_SUS_KSTAT_REDIRECT=y' "$CFG"; then
+            echo "Unexpected obsolete SUS_KSTAT_REDIRECT option enabled."
             exit 1
           fi
 
-          cp \
-            out/.config \
-            final.config
-
-          echo "Final Kconfig verified."
+          cp "$CFG" "$GITHUB_WORKSPACE/final.config"
 
       - name: Build arm64 Image
         id: kernel_build
+        continue-on-error: true
         run: |
           set -o pipefail
 
@@ -654,88 +378,250 @@ jobs:
             KCFLAGS="-Wno-error=frame-larger-than" \
             -j"$(nproc)" \
             Image \
-            2>&1 | tee \
-            "$GITHUB_WORKSPACE/kernel-build.log"
+            2>&1 | tee "$GITHUB_WORKSPACE/kernel-build.log"
 
-          build_status="${PIPESTATUS[0]}"
+          status=${PIPESTATUS[0]}
+          exit "$status"
 
-          if [ "$build_status" -ne 0 ]; then
-            echo "Kernel build failed with status $build_status."
-            exit "$build_status"
-          fi
-
-          test -s \
-            out/arch/arm64/boot/Image
-
-      - name: Verify built kernel
+      - name: Verify kernel and SUSFS
         if: steps.kernel_build.outcome == 'success'
         run: |
           set -euo pipefail
 
-          test -s \
-            out/arch/arm64/boot/Image
+          test -s out/arch/arm64/boot/Image
+          test -s out/vmlinux
+          test -s out/.config
+          test -s out/fs/susfs.o
 
-          test -s \
-            out/vmlinux
+          grep -qx 'CONFIG_KSU_SUSFS=y' out/.config
+          llvm-nm out/vmlinux 2>/dev/null | grep -qi susfs
 
-          test -s \
-            out/.config
+          file out/arch/arm64/boot/Image
+          ls -lh out/arch/arm64/boot/Image
 
-          grep -qx \
-            'CONFIG_KSU=y' \
-            out/.config
+      - name: Stop if kernel verification failed
+        if: steps.kernel_build.outcome != 'success'
+        run: |
+          echo "Kernel build failed."
+          exit 1
 
-          grep -qx \
-            'CONFIG_KSU_SUSFS=y' \
-            out/.config
-
-          echo "Kernel Image built successfully."
-
-      - name: Verify SUSFS object
-        if: steps.kernel_build.outcome == 'success'
+      - name: Download Magisk
         run: |
           set -euo pipefail
 
-          if [ -s out/fs/susfs.o ]; then
-            echo "SUSFS object found."
-          elif [ -s out/fs/built-in.a ]; then
-            echo "SUSFS is built into fs/built-in.a."
-          else
-            echo "SUSFS build object not found."
-            exit 1
-          fi
+          MAGISK_URL="$(
+            curl -fsSL \
+              https://api.github.com/repos/topjohnwu/Magisk/releases/latest \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); u=[a["browser_download_url"] for a in d.get("assets",[]) if a["name"].startswith("Magisk-") and a["name"].endswith(".apk") and "debug" not in a["name"].lower()]; print(u[0] if u else "")'
+          )"
 
-      - name: Generate build manifest
-        if: steps.kernel_build.outcome == 'success'
+          test -n "$MAGISK_URL"
+
+          curl \
+            -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            -o tools/Magisk.apk \
+            "$MAGISK_URL"
+
+          test -s tools/Magisk.apk
+
+      - name: Extract magiskboot
+        run: |
+          set -euo pipefail
+
+          unzip -p \
+            tools/Magisk.apk \
+            lib/x86_64/libmagiskboot.so \
+            > tools/magiskboot
+
+          test -s tools/magiskboot
+          chmod +x tools/magiskboot
+
+      - name: Download stock boot image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          rm -rf bootwork
+          mkdir -p bootwork
+
+          gh release download \
+            stock-boot \
+            --repo "${{ github.repository }}" \
+            --pattern "*.zip" \
+            --dir bootwork
+
+          ZIP_FILE="$(
+            find bootwork \
+              -maxdepth 1 \
+              -type f \
+              -name '*.zip' \
+              -print -quit
+          )"
+
+          test -n "$ZIP_FILE"
+
+          mkdir -p bootwork/extracted
+
+          unzip -o \
+            "$ZIP_FILE" \
+            -d bootwork/extracted
+
+          BOOT_FILE="$(
+            find bootwork/extracted \
+              -type f \
+              -name 'boot.img' \
+              -print -quit
+          )"
+
+          test -n "$BOOT_FILE"
+          cp "$BOOT_FILE" bootwork/boot.img
+          test -s bootwork/boot.img
+
+      - name: Unpack stock boot
+        run: |
+          set -euo pipefail
+
+          cd bootwork
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            unpack boot.img
+
+          test -s kernel
+
+      - name: Replace kernel
+        run: |
+          set -euo pipefail
+
+          cp \
+            "$GITHUB_WORKSPACE/out/arch/arm64/boot/Image" \
+            "$GITHUB_WORKSPACE/bootwork/kernel"
+
+          test -s \
+            "$GITHUB_WORKSPACE/bootwork/kernel"
+
+      - name: Repack boot image
+        run: |
+          set -euo pipefail
+
+          cd bootwork
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            repack boot.img
+
+          test -s new-boot.img
+
+          mv \
+            new-boot.img \
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+
+          test -s \
+            "$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+
+      - name: Verify final boot image
+        run: |
+          set -euo pipefail
+
+          FINAL="$GITHUB_WORKSPACE/boot-BG7n-SUSFS-KSU.img"
+          IMAGE="$GITHUB_WORKSPACE/out/arch/arm64/boot/Image"
+
+          test -s "$FINAL"
+
+          rm -rf verification/final-boot
+          mkdir -p verification/final-boot
+
+          cp "$FINAL" verification/final-boot/boot.img
+
+          cd verification/final-boot
+
+          "$GITHUB_WORKSPACE/tools/magiskboot" \
+            unpack boot.img
+
+          test -s kernel
+
+          FINAL_SHA="$(sha256sum kernel | cut -d' ' -f1)"
+          IMAGE_SHA="$(sha256sum "$IMAGE" | cut -d' ' -f1)"
+
+          test "$FINAL_SHA" = "$IMAGE_SHA"
+
+          echo "$FINAL_SHA" > kernel.sha256
+          echo "$IMAGE_SHA" > image.sha256
+
+      - name: Build SUSFS userspace module
+        run: |
+          set -euo pipefail
+
+          NDK_ZIP=android-ndk-r27d-linux.zip
+          NDK_URL=https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+          NDK_SHA1=22105e410cf29afcf163760cc95522b9fb981121
+
+          curl \
+            -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            -o "$NDK_ZIP" \
+            "$NDK_URL"
+
+          echo "$NDK_SHA1  $NDK_ZIP" \
+            | sha1sum -c -
+
+          mkdir -p ndk
+
+          unzip -q \
+            "$NDK_ZIP" \
+            -d ndk
+
+          NDK_DIR="$(
+            find ndk \
+              -maxdepth 1 \
+              -type d \
+              -name 'android-ndk-*' \
+              -print -quit
+          )"
+
+          test -d "$NDK_DIR"
+
+          export ANDROID_NDK_ROOT="$GITHUB_WORKSPACE/$NDK_DIR"
+          export PATH="$ANDROID_NDK_ROOT:$PATH"
+
+          cd "$SUSFS_DIR"
+
+          ./build_ksu_susfs_tool.sh
+
+          test -s \
+            ksu_module_susfs/tools/ksu_susfs_arm64
+
+      - name: Build SUSFS module
+        run: |
+          set -euo pipefail
+
+          cd "$SUSFS_DIR"
+
+          ./build_ksu_module.sh
+
+          test -s \
+            ksu_module_susfs.zip
+
+          cp \
+            ksu_module_susfs.zip \
+            "$GITHUB_WORKSPACE/susfs4ksu-module-v2.2.0.zip"
+
+      - name: Generate manifest
         run: |
           set -euo pipefail
 
           {
-            echo "=== BUILD MANIFEST ==="
-            echo
-            echo "Kernel commit:"
-            git -C kernel rev-parse HEAD
-            echo
-            echo "KernelSU archive:"
-            sha256sum KernelSU-Next.tar.gz
-            echo
-            echo "SUSFS archive:"
-            sha256sum susfs4ksu-gki-android12-5.10.tar.gz
-            echo
-            echo "Stock config:"
-            sha256sum stock.config
-            echo
-            echo "BG7n original patch:"
-            sha256sum patches-susfs-bg7n-legacy-reference.patch
-            echo
-            echo "BG7n cleaned patch:"
-            sha256sum verification/bg7n-clean.patch
-            echo
-            echo "Kernel Image:"
-            sha256sum out/arch/arm64/boot/Image
-            echo
-            echo "Final config:"
-            sha256sum final.config
+            echo "android_common_commit=$(git -C kernel rev-parse HEAD)"
+            echo "kernelsu_sha256=$(sha256sum KernelSU-Next.tar.gz | cut -d' ' -f1)"
+            echo "susfs_sha256=$(sha256sum susfs4ksu-gki-android12-5.10.tar.gz | cut -d' ' -f1)"
+            echo "stock_config_sha256=$(sha256sum stock.config | cut -d' ' -f1)"
+            echo "official_susfs_patch_sha256=$(sha256sum 50_add_susfs_in_gki-android12-5.10.patch | cut -d' ' -f1)"
+            echo "legacy_patch_sha256=$(sha256sum patches-susfs-bg7n-legacy-reference.patch | cut -d' ' -f1)"
+            echo "kernel_image_sha256=$(sha256sum out/arch/arm64/boot/Image | cut -d' ' -f1)"
+            echo "final_boot_sha256=$(sha256sum boot-BG7n-SUSFS-KSU.img | cut -d' ' -f1)"
+            echo "final_config_sha256=$(sha256sum final.config | cut -d' ' -f1)"
           } > BUILD_MANIFEST.txt
 
           test -s BUILD_MANIFEST.txt
@@ -749,7 +635,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload verification bundle
+      - name: Upload verification
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -762,16 +648,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload successful kernel
-        if: steps.kernel_build.outcome == 'success'
+      - name: Upload final build
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: BG7n-SUSFS-KSU-kernel-${{ github.run_number }}
+          name: BG7n-SUSFS-KSU-full-${{ github.run_number }}
           path: |
+            boot-BG7n-SUSFS-KSU.img
             out/arch/arm64/boot/Image
-            out/vmlinux
             final.config
+            susfs4ksu-module-v2.2.0.zip
             BUILD_MANIFEST.txt
           include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload boot image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-BG7n-SUSFS-KSU-${{ github.run_number }}
+          path: boot-BG7n-SUSFS-KSU.img
           if-no-files-found: error
           retention-days: 14
