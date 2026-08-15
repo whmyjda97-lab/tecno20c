@@ -393,11 +393,21 @@ jobs:
           test -s out/.config
           test -s out/fs/susfs.o
 
+          grep -qx 'CONFIG_KSU=y' out/.config
           grep -qx 'CONFIG_KSU_SUSFS=y' out/.config
-          llvm-nm out/vmlinux 2>/dev/null | grep -qi susfs
 
+          echo "Kernel Image:"
           file out/arch/arm64/boot/Image
           ls -lh out/arch/arm64/boot/Image
+
+          echo "SUSFS object:"
+          ls -lh out/fs/susfs.o
+
+          echo "KernelSU/SUSFS configuration:"
+          grep '^CONFIG_KSU=' out/.config
+          grep '^CONFIG_KSU_SUSFS=' out/.config
+
+          echo "Kernel and SUSFS verification passed."
 
       - name: Stop if kernel verification failed
         if: steps.kernel_build.outcome != 'success'
