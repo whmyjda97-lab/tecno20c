@@ -26,31 +26,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # ==============================================================
-  # GOOGLE GKI
-  # ==============================================================
-
   GKI_MANIFEST_BRANCH: common-android12-5.10-2025-06
   GKI_COMMON_TAG: android12-5.10-2025-06_r3
   GKI_VERSION: "5.10.237"
   GKI_SHA: d09ef2e980e0974a0d6dfe762e29fff118db7f46
 
-  # ==============================================================
-  # KERNELSU
-  # ==============================================================
-
   KSU_REPO: https://github.com/5ec1cff/KernelSU.git
   KSU_COMMIT: 3be1013dbda6ebab14e7fcd231bcbae5ce6425ff
 
-  # ==============================================================
-  # SUSFS
-  # ==============================================================
-
   SUSFS_REPO: https://gitlab.com/simonpunk/susfs4ksu.git
-
-  # ==============================================================
-  # DEVICE
-  # ==============================================================
 
   BOOT_REPO: whmyjda97-lab/tecno20c
   DEVICE: BG7n
@@ -110,7 +94,6 @@ jobs:
             lz4 \
             openssl \
             pahole \
-            patchelf \
             pkg-config \
             python3 \
             python3-distutils \
@@ -119,15 +102,17 @@ jobs:
             zip \
             android-sdk-libsparse-utils
 
-          echo "=== HOST ARCHITECTURE ==="
+          echo "=== HOST ==="
           uname -m
           dpkg --print-architecture
 
-          echo "=== TOOLCHAIN ==="
+          echo "=== LLVM ==="
           clang --version
           ld.lld --version
           llvm-ar --version
           llvm-nm --version
+
+          echo "=== TOOLS ==="
           python3 --version
           gh --version
 
@@ -155,6 +140,8 @@ jobs:
             "${RUNNER_TEMP}/android-ndk"
 
           curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
             "https://dl.google.com/android/repository/${NDK_ARCHIVE}" \
             -o "${RUNNER_TEMP}/${NDK_ARCHIVE}"
 
@@ -193,6 +180,8 @@ jobs:
           rm -rf stock-release stock
           mkdir -p stock-release stock
 
+          echo "=== RELEASE ==="
+
           gh release view \
             "${BOOT_RELEASE_TAG}" \
             --repo "${BOOT_REPO}" \
@@ -229,8 +218,7 @@ jobs:
           )
 
           if [ "${#CANDIDATES[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one release ZIP containing exactly one boot.img."
-            echo "Candidates: ${#CANDIDATES[@]}"
+            echo "::error::Expected exactly one ZIP containing boot.img"
             printf '%s\n' "${CANDIDATES[@]:-<none>}"
             exit 1
           fi
@@ -249,6 +237,7 @@ jobs:
 
           test -s stock/boot.img
 
+          echo "=== STOCK BOOT ==="
           file stock/boot.img
 
           sha256sum stock/boot.img \
@@ -265,17 +254,14 @@ jobs:
 
           test -s BG7n_stock_defconfig
 
-          echo "=== BG7n stock defconfig SHA256 ==="
           sha256sum BG7n_stock_defconfig
-
-          echo "=== Stock config facts ==="
 
           grep -E \
             '^CONFIG_(ARM64_4K_PAGES|ARM64_16K_PAGES|ARM64_64K_PAGES|ARM64_VA_BITS_[0-9]+|ARM64_PA_BITS_[0-9]+|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST)=' \
             BG7n_stock_defconfig || true
 
       # ============================================================
-      # REPO
+      # REPO TOOL
       # ============================================================
 
       - name: Install repo tool
@@ -508,20 +494,18 @@ jobs:
 
           (
             cd KernelSU
-
             patch --batch --forward -p1 \
               < 10_enable_susfs_for_ksu.patch
           )
 
           (
             cd common
-
             patch --batch --forward -p1 \
               < 50_add_susfs_in_gki-android12-5.10.patch
           )
 
       # ============================================================
-      # INTEGRATE KSU
+      # INTEGRATE KERNELSU
       # ============================================================
 
       - name: Integrate KernelSU
@@ -550,8 +534,7 @@ jobs:
             'obj-$(CONFIG_KSU) += kernelsu/' \
             common/drivers/Makefile
           then
-            printf '%s\n' \
-              'obj-$(CONFIG_KSU) += kernelsu/' \
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' \
               >> common/drivers/Makefile
           fi
 
@@ -571,7 +554,7 @@ jobs:
 
               if pos < 0:
                   raise SystemExit(
-                      "ERROR: drivers/Kconfig has no endmenu"
+                      "drivers/Kconfig has no endmenu"
                   )
 
               text = (
@@ -604,7 +587,7 @@ jobs:
           echo "KernelSU integration OK"
 
       # ============================================================
-      # CLEAN GENERATED CONFIG
+      # CLEAN CONFIG
       # ============================================================
 
       - name: Remove stale generated configuration
@@ -621,7 +604,7 @@ jobs:
             arch/arm64/include/generated
 
       # ============================================================
-      # GENERATE BG7N DEFCONFIG
+      # GENERATE DEFCONFIG
       # ============================================================
 
       - name: Generate BG7n KSU SUSFS defconfig
@@ -675,9 +658,9 @@ jobs:
           from pathlib import Path
 
           protected = {
-              line.strip()
-              for line in Path(sys.argv[1]).read_text().splitlines()
-              if line.strip()
+              x.strip()
+              for x in Path(sys.argv[1]).read_text().splitlines()
+              if x.strip()
           }
 
           stock = Path(sys.argv[2])
@@ -717,8 +700,7 @@ jobs:
           )
 
           print(
-              f"Filtered stock config: "
-              f"{len(kept)} lines"
+              f"Filtered stock config: {len(kept)} lines"
           )
           PY
 
@@ -738,10 +720,7 @@ jobs:
           scripts/config \
             --file "${CONFIG_OUT}/.config" \
             -d TRIM_UNUSED_KSYMS \
-            -d UNUSED_KSYMS_WHITELIST
-
-          scripts/config \
-            --file "${CONFIG_OUT}/.config" \
+            -d UNUSED_KSYMS_WHITELIST \
             -e KSU \
             -e KSU_SUSFS
 
@@ -754,51 +733,32 @@ jobs:
             O="${CONFIG_OUT}" \
             olddefconfig
 
-          echo
           echo "=== RESOLVED CONFIG ==="
 
           grep -E \
-            '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK|KPROBES|EXT4_FS)=' \
+            '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL)=' \
             "${CONFIG_OUT}/.config" || true
 
-          grep -q \
-            '^CONFIG_KSU=y$' \
+          grep -q '^CONFIG_KSU=y$' \
             "${CONFIG_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
+          grep -q '^CONFIG_KSU_SUSFS=y$' \
             "${CONFIG_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_MODULES=y$' \
+          grep -q '^CONFIG_MODULES=y$' \
             "${CONFIG_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
+          grep -q '^CONFIG_MODVERSIONS=y$' \
             "${CONFIG_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_KALLSYMS=y$' \
+          grep -q '^CONFIG_KALLSYMS=y$' \
             "${CONFIG_OUT}/.config"
 
-          if grep -q \
-            '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
+          ! grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
             "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_TRIM_UNUSED_KSYMS is still enabled"
-            exit 1
-          fi
 
-          if grep -q \
-            '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
+          ! grep -q '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
             "${CONFIG_OUT}/.config"
-          then
-            echo "::error::CONFIG_UNUSED_KSYMS_WHITELIST is still set"
-            exit 1
-          fi
-
-          echo
-          echo "=== KSU/SUSFS CONFIGURATION OK ==="
 
           make \
             LLVM=1 \
@@ -816,13 +776,6 @@ jobs:
           test -s \
             arch/arm64/configs/bg7n_defconfig
 
-          echo
-          echo "=== FINAL MINIMAL DEFCONFIG ==="
-
-          grep -E \
-            '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST)=' \
-            arch/arm64/configs/bg7n_defconfig || true
-
           rm -f "${CONFIG_OUT}/.config"
 
           make \
@@ -838,43 +791,27 @@ jobs:
             "${CONFIG_OUT}/.config" \
             "${CONFIG_OUT}/expanded.config"
 
-          grep -q \
-            '^CONFIG_KSU=y$' \
+          grep -q '^CONFIG_KSU=y$' \
             "${CONFIG_OUT}/expanded.config"
 
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
+          grep -q '^CONFIG_KSU_SUSFS=y$' \
             "${CONFIG_OUT}/expanded.config"
 
-          grep -q \
-            '^CONFIG_MODULES=y$' \
+          grep -q '^CONFIG_MODULES=y$' \
             "${CONFIG_OUT}/expanded.config"
 
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
+          grep -q '^CONFIG_MODVERSIONS=y$' \
             "${CONFIG_OUT}/expanded.config"
 
-          grep -q \
-            '^CONFIG_KALLSYMS=y$' \
+          grep -q '^CONFIG_KALLSYMS=y$' \
             "${CONFIG_OUT}/expanded.config"
 
-          if grep -q \
-            '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
+          ! grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
             "${CONFIG_OUT}/expanded.config"
-          then
-            echo "::error::TRIM_UNUSED_KSYMS returned after defconfig expansion"
-            exit 1
-          fi
 
-          if grep -q \
-            '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
+          ! grep -q '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
             "${CONFIG_OUT}/expanded.config"
-          then
-            echo "::error::UNUSED_KSYMS_WHITELIST returned after expansion"
-            exit 1
-          fi
 
-          echo
           echo "=== FINAL CONFIG PASSED ==="
 
       # ============================================================
@@ -912,19 +849,11 @@ jobs:
 
           DEFCONFIG=bg7n_defconfig
 
-          # ----------------------------------------------------------
-          # CUSTOM KSU/SUSFS BUILD
-          # ----------------------------------------------------------
-
           KMI_ENFORCED=0
           KMI_SYMBOL_LIST_STRICT_MODE=0
           TRIM_NONLISTED_KMI=0
 
           KMI_SYMBOL_LIST=android/abi_gki_aarch64
-
-          # ----------------------------------------------------------
-          # Force final KernelSU/SUSFS configuration.
-          # ----------------------------------------------------------
 
           POST_DEFCONFIG_CMDS="update_bg7n_config"
 
@@ -945,7 +874,7 @@ jobs:
                       olddefconfig
               )
 
-              echo "=== POST DEFCONFIG CONFIG ==="
+              echo "=== POST DEFCONFIG ==="
 
               grep -E \
                   '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL)=' \
@@ -1036,47 +965,30 @@ jobs:
               olddefconfig
           )
 
-          echo "=== FINAL PRE-BUILD CONFIG ==="
-
           grep -E \
             '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK)=' \
             "${CHECK_OUT}/.config" || true
 
-          grep -q \
-            '^CONFIG_KSU=y$' \
+          grep -q '^CONFIG_KSU=y$' \
             "${CHECK_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
+          grep -q '^CONFIG_KSU_SUSFS=y$' \
             "${CHECK_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_MODULES=y$' \
+          grep -q '^CONFIG_MODULES=y$' \
             "${CHECK_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
+          grep -q '^CONFIG_MODVERSIONS=y$' \
             "${CHECK_OUT}/.config"
 
-          grep -q \
-            '^CONFIG_KALLSYMS=y$' \
+          grep -q '^CONFIG_KALLSYMS=y$' \
             "${CHECK_OUT}/.config"
 
-          if grep -q \
-            '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
+          ! grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
             "${CHECK_OUT}/.config"
-          then
-            echo "::error::TRIM_UNUSED_KSYMS still enabled"
-            exit 1
-          fi
 
-          if grep -q \
-            '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
+          ! grep -q '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
             "${CHECK_OUT}/.config"
-          then
-            echo "::error::UNUSED_KSYMS_WHITELIST still configured"
-            exit 1
-          fi
 
           echo "Pre-build configuration OK."
 
@@ -1131,15 +1043,6 @@ jobs:
           export MAKEFLAGS="-j${MAKE_JOBS}"
 
           rm -rf out/android12-5.10
-
-          echo "=== Build configuration ==="
-
-          grep -E \
-            '^(DEFCONFIG|KMI_ENFORCED|KMI_SYMBOL_LIST_STRICT_MODE|TRIM_NONLISTED_KMI|KMI_SYMBOL_LIST)=' \
-            common/build.config.bg7n.ksu.susfs
-
-          echo
-          echo "=== Starting kernel build ==="
 
           BUILD_CONFIG=common/build.config.bg7n.ksu.susfs \
             ./build/build.sh
@@ -1238,41 +1141,26 @@ jobs:
             '^CONFIG_(KSU|KSU_SUSFS|TRIM_UNUSED_KSYMS|UNUSED_KSYMS_WHITELIST|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|KPROBES|EXT4_FS|THREAD_INFO_IN_TASK|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|OVERLAY_FS)=' \
             ../artifact/kernel/.config || true
 
-          grep -q \
-            '^CONFIG_KSU=y$' \
+          grep -q '^CONFIG_KSU=y$' \
             ../artifact/kernel/.config
 
-          grep -q \
-            '^CONFIG_KSU_SUSFS=y$' \
+          grep -q '^CONFIG_KSU_SUSFS=y$' \
             ../artifact/kernel/.config
 
-          grep -q \
-            '^CONFIG_MODULES=y$' \
+          grep -q '^CONFIG_MODULES=y$' \
             ../artifact/kernel/.config
 
-          grep -q \
-            '^CONFIG_MODVERSIONS=y$' \
+          grep -q '^CONFIG_MODVERSIONS=y$' \
             ../artifact/kernel/.config
 
-          grep -q \
-            '^CONFIG_KALLSYMS=y$' \
+          grep -q '^CONFIG_KALLSYMS=y$' \
             ../artifact/kernel/.config
 
-          if grep -q \
-            '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
+          ! grep -q '^CONFIG_TRIM_UNUSED_KSYMS=y$' \
             ../artifact/kernel/.config
-          then
-            echo "::error::TRIM_UNUSED_KSYMS unexpectedly enabled"
-            exit 1
-          fi
 
-          if grep -q \
-            '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
+          ! grep -q '^CONFIG_UNUSED_KSYMS_WHITELIST=' \
             ../artifact/kernel/.config
-          then
-            echo "::error::UNUSED_KSYMS_WHITELIST unexpectedly configured"
-            exit 1
-          fi
 
           {
             echo "=== Kernel version ==="
@@ -1368,22 +1256,22 @@ jobs:
             work/boot/boot.img
 
           # --------------------------------------------------------
+          # MagiskBoot
+          #
           # IMPORTANT:
+          # lib/arm64-v8a/libmagiskboot.so is Android ARM64.
+          # The GitHub runner is x86_64.
           #
-          # GitHub Actions ubuntu-22.04 runner is x86_64.
+          # We therefore extract:
+          # lib/x86_64/libmagiskboot.so
           #
-          # DO NOT extract:
-          #   lib/arm64-v8a/libmagiskboot.so
-          #
-          # That binary is ARM64 and cannot execute on the runner.
-          #
-          # We intentionally extract:
-          #   lib/x86_64/libmagiskboot.so
+          # Do NOT test it with --help.
+          # MagiskBoot expects an ACTION such as unpack/repack.
           # --------------------------------------------------------
 
           MAGISK_API="https://api.github.com/repos/topjohnwu/Magisk/releases/latest"
 
-          echo "=== Fetching latest Magisk release metadata ==="
+          echo "=== Fetching latest Magisk release ==="
 
           MAGISK_URL="$(
             curl -fsSL \
@@ -1401,7 +1289,6 @@ jobs:
 
           test -n "${MAGISK_URL}"
 
-          echo "Magisk APK:"
           echo "${MAGISK_URL}"
 
           curl -fL \
@@ -1412,29 +1299,18 @@ jobs:
 
           test -s magisk.apk
 
-          echo
-          echo "=== Magisk APK information ==="
+          echo "=== Magisk APK architectures ==="
 
-          unzip -l magisk.apk |
+          unzip -Z1 magisk.apk |
             grep -E \
-              'lib/(arm64-v8a|armeabi-v7a|x86|x86_64)/libmagiskboot\.so' \
-              || true
-
-          # --------------------------------------------------------
-          # Verify x86_64 magiskboot exists.
-          # --------------------------------------------------------
+              'lib/(arm64-v8a|armeabi-v7a|x86|x86_64)/libmagiskboot\.so'
 
           if ! unzip -Z1 magisk.apk |
               grep -qx 'lib/x86_64/libmagiskboot.so'
           then
-            echo "::error::Magisk APK does not contain x86_64 magiskboot."
-            echo "::error::Cannot execute ARM64 magiskboot on x86_64 runner."
+            echo "::error::x86_64 magiskboot is missing from Magisk APK"
             exit 1
           fi
-
-          # --------------------------------------------------------
-          # Extract HOST x86_64 magiskboot.
-          # --------------------------------------------------------
 
           rm -f \
             work/magiskboot \
@@ -1455,96 +1331,95 @@ jobs:
           chmod 0755 \
             work/magiskboot
 
-          # --------------------------------------------------------
-          # CRITICAL ARCHITECTURE CHECK
-          # --------------------------------------------------------
-
-          echo
           echo "=== Runner architecture ==="
 
           uname -m
           dpkg --print-architecture
 
-          echo
-          echo "=== magiskboot file type ==="
+          echo "=== magiskboot type ==="
 
           file \
             work/magiskboot
 
-          MAGISK_ARCH="$(
-            file work/magiskboot
-          )"
-
-          echo "${MAGISK_ARCH}" \
-            | grep -E \
+          file work/magiskboot |
+            grep -E \
               'ELF 64-bit.*x86-64|x86-64'
-          
-          # --------------------------------------------------------
-          # Verify the binary can actually execute.
-          # --------------------------------------------------------
-
-          echo
-          echo "=== magiskboot version/test ==="
-
-          work/magiskboot --help \
-            > artifact/reports/magiskboot_help.txt \
-            2>&1 \
-            || true
-
-          if ! work/magiskboot --help \
-              >/dev/null 2>&1
-          then
-            echo "::error::x86_64 magiskboot cannot execute."
-            exit 1
-          fi
 
           # --------------------------------------------------------
-          # Unpack stock boot.
+          # REAL EXECUTION TEST
+          #
+          # Do NOT use:
+          #   magiskboot --help
+          #
+          # Instead execute the real operation below.
+          # If the binary cannot execute, this step fails here.
+          # --------------------------------------------------------
+
+          echo "=== Testing magiskboot with real boot image ==="
+
+          (
+            cd work/boot
+
+            rm -f \
+              kernel \
+              kernel_dtb \
+              ramdisk.cpio \
+              second \
+              dtb \
+              extra \
+              recovery_dtbo \
+              header \
+              new-boot.img
+
+            ../magiskboot unpack boot.img
+          )
+
+          test -f \
+            work/boot/kernel
+
+          test -s \
+            work/boot/kernel
+
+          echo "=== Stock boot successfully unpacked ==="
+
+          file \
+            work/boot/kernel
+
+          # --------------------------------------------------------
+          # Replace kernel
+          # --------------------------------------------------------
+
+          test -s \
+            artifact/kernel/Image
+
+          cp \
+            artifact/kernel/Image \
+            work/boot/kernel
+
+          test -s \
+            work/boot/kernel
+
+          echo "=== New kernel ==="
+
+          file \
+            work/boot/kernel
+
+          # --------------------------------------------------------
+          # Repack
           # --------------------------------------------------------
 
           (
             cd work/boot
 
-            echo
-            echo "=== Unpacking stock boot.img ==="
-
-            ../magiskboot unpack boot.img
-
-            test -f kernel
+            ../magiskboot repack \
+              boot.img
 
             test -s \
-              ../../artifact/kernel/Image
-
-            echo
-            echo "=== Original boot kernel ==="
-
-            file kernel
-
-            echo
-            echo "=== Replacing boot kernel ==="
-
-            cp \
-              ../../artifact/kernel/Image \
-              kernel
-
-            test -s kernel
-
-            echo
-            echo "=== New boot kernel ==="
-
-            file kernel
-
-            echo
-            echo "=== Repacking boot.img ==="
-
-            ../magiskboot repack boot.img
-
-            test -s new-boot.img
+              new-boot.img
           )
 
-          # --------------------------------------------------------
-          # Save generated boot.
-          # --------------------------------------------------------
+          test -s \
+            work/boot/new-boot.img
 
           cp \
             work/boot/new-boot.img \
@@ -1553,6 +1428,8 @@ jobs:
           test -s \
             artifact/boot/BG7n-KSU-SUSFS-boot.img
 
+          echo "=== GENERATED BOOT ==="
+
           file \
             artifact/boot/BG7n-KSU-SUSFS-boot.img
 
@@ -1560,8 +1437,46 @@ jobs:
             artifact/boot/BG7n-KSU-SUSFS-boot.img \
             | tee artifact/reports/generated_boot.sha256
 
-          echo
           echo "=== BOOT REPACK SUCCESS ==="
+
+      # ============================================================
+      # VERIFY GENERATED BOOT
+      # ============================================================
+
+      - name: Verify generated boot image
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          test -s \
+            artifact/boot/BG7n-KSU-SUSFS-boot.img
+
+          mkdir -p \
+            verify/generated
+
+          cp \
+            artifact/boot/BG7n-KSU-SUSFS-boot.img \
+            verify/generated/boot.img
+
+          (
+            cd verify/generated
+
+            ../work/magiskboot unpack \
+              boot.img
+          )
+
+          test -s \
+            verify/generated/kernel
+
+          echo "=== GENERATED BOOT KERNEL ==="
+
+          file \
+            verify/generated/kernel
+
+          sha256sum \
+            verify/generated/kernel
+
+          echo "=== GENERATED BOOT VERIFICATION OK ==="
 
       # ============================================================
       # BUILD INFO
@@ -1668,11 +1583,9 @@ jobs:
             artifact/reports \
             artifact/package/reports
 
-          if [ -d artifact/boot ]; then
-            cp -a \
-              artifact/boot \
-              artifact/package/boot
-          fi
+          cp -a \
+            artifact/boot \
+            artifact/package/boot
 
           cp \
             BG7n_stock_defconfig \
@@ -1715,24 +1628,23 @@ jobs:
             CONFIG_TRIM_UNUSED_KSYMS=n
             CONFIG_UNUSED_KSYMS_WHITELIST=unset
 
-          Magisk boot repacker:
+          MagiskBoot:
             HOST=x86_64
             VARIANT=lib/x86_64/libmagiskboot.so
 
           IMPORTANT:
-            This is a custom KernelSU/SUSFS kernel.
-            It is NOT an unmodified certified GKI kernel.
+            Keep the original stock boot image as recovery backup.
 
-            The stock boot.img must be kept as a recovery backup
-            before flashing the modified boot image.
+            The generated boot image is:
+              boot/BG7n-KSU-SUSFS-boot.img
 
-            Check:
+            Kernel verification:
               reports/kernel_verification.txt
 
-            Check:
+            Generated boot hash:
               reports/generated_boot.sha256
 
-            Check:
+            Stock boot hash:
               reports/stock_boot.sha256
           EOF
 
