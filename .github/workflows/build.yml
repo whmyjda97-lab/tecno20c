@@ -31,7 +31,9 @@ env:
   GKI_COMMON_TAG: android12-5.10-2025-06_r3
   GKI_VERSION: "5.10.237"
   GKI_SHA: d09ef2e980e0974a0d6dfe762e29fff118db7f46
-  KSU_TAG: v3.2.5
+  # Exact KernelSU tree whose Git blob pre-images match the SUSFS patch.
+  KSU_REPO: https://github.com/5ec1cff/KernelSU.git
+  KSU_COMMIT: 3be1013dbda6ebab14e7fcd231bcbae5ce6425ff
   SUSFS_REPO: https://gitlab.com/simonpunk/susfs4ksu.git
   BOOT_REPO: whmyjda97-lab/tecno20c
   DEVICE: BG7n
@@ -216,19 +218,29 @@ jobs:
             echo "COMMON_COMMIT=${COMMON_COMMIT}"
           } | tee ../gki_identity.txt
 
-      - name: Install official KernelSU v3.2.5 (pinned)
+      - name: Install exact KernelSU patch-base tree
         shell: bash
         working-directory: gki
         run: |
           set -euxo pipefail
 
-          curl -LSs             https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh             | bash -s "${KSU_TAG}"
+          rm -rf KernelSU
+          git clone --no-tags --filter=blob:none "${KSU_REPO}" KernelSU
+          git -C KernelSU fetch --no-tags origin "${KSU_COMMIT}"
+          git -C KernelSU checkout --detach "${KSU_COMMIT}"
 
-          test -d KernelSU
-          KSU_COMMIT="$(git -C KernelSU rev-parse HEAD)"
-          git -C KernelSU describe --tags --exact-match "${KSU_TAG}" >/dev/null
-          echo "KERNELSU_COMMIT=${KSU_COMMIT}" | tee ../kernelsu_identity.txt
+          ACTUAL_KSU_COMMIT="$(git -C KernelSU rev-parse HEAD)"
+          test "${ACTUAL_KSU_COMMIT}" = "${KSU_COMMIT}"
 
+          echo "KERNELSU_REPO=${KSU_REPO}" | tee ../kernelsu_identity.txt
+          echo "KERNELSU_COMMIT=${ACTUAL_KSU_COMMIT}" | tee -a ../kernelsu_identity.txt
+
+          # Exact Git blob pre-images from SUSFS 10_enable_susfs_for_ksu.patch.
+          test "$(git -C KernelSU hash-object kernel/Kbuild | cut -c1-8)" = "cc3610a8"
+          test "$(git -C KernelSU hash-object kernel/Kconfig | cut -c1-8)" = "88e22811"
+          test "$(git -C KernelSU hash-object kernel/core/init.c | cut -c1-8)" = "09b290a9"
+
+          echo "Exact KernelSU/SUSFS patch-base verified."
       - name: Clone and verify pinned SUSFS
         shell: bash
         working-directory: gki
@@ -257,7 +269,7 @@ jobs:
             exit 1
           }
 
-      - name: Apply SUSFS patches with Git 3-way compatibility
+      - name: Apply SUSFS patches on exact matching base
         shell: bash
         working-directory: gki
         run: |
@@ -268,50 +280,25 @@ jobs:
           cp -a susfs/kernel_patches/fs/. common/fs/
           cp -a susfs/kernel_patches/include/linux/. common/include/linux/
 
-          echo "=== KernelSU base objects referenced by SUSFS patch ==="
-          for obj in cc3610a8 eb990887 88e22811 5c169f59 d40d0ec1 93f5388f 09b290a9 0af7fa35; do
-            if git -C KernelSU cat-file -e "${obj}^{blob}" 2>/dev/null; then
-              echo "KernelSU blob ${obj}: present"
-            else
-              echo "::warning::KernelSU blob ${obj}: not present as a reachable object"
-            fi
-          done
-
-          echo "=== Unshallow KernelSU for 3-way merge ancestry ==="
-          git -C KernelSU fetch --unshallow 2>/dev/null || true
-
-          echo "=== Apply KernelSU SUSFS patch with 3-way merge ==="
+          echo "=== KernelSU SUSFS patch ==="
           (
             cd KernelSU
-            git apply --3way --whitespace=nowarn 10_enable_susfs_for_ksu.patch
+            patch --batch --forward -p1 < 10_enable_susfs_for_ksu.patch
           )
-
-          if git -C KernelSU diff --name-only --diff-filter=U | grep -q .; then
-            echo "::error::KernelSU SUSFS patch produced unresolved merge conflicts."
-            git -C KernelSU diff --name-only --diff-filter=U
-            exit 1
-          fi
 
           git -C KernelSU diff --check
+          test -z "$(git -C KernelSU status --porcelain | grep '^UU ' || true)"
 
-          echo "=== Apply GKI SUSFS patch with 3-way merge ==="
+          echo "=== GKI SUSFS patch ==="
           (
             cd common
-            git apply --3way --whitespace=nowarn 50_add_susfs_in_gki-android12-5.10.patch
+            patch --batch --forward -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           )
 
-          if git -C common diff --name-only --diff-filter=U | grep -q .; then
-            echo "::error::GKI SUSFS patch produced unresolved merge conflicts."
-            git -C common diff --name-only --diff-filter=U
-            exit 1
-          fi
-
           git -C common diff --check
+          test -z "$(git -C common status --porcelain | grep '^UU ' || true)"
 
-          echo "=== SUSFS patch result ==="
-          git -C KernelSU status --short
-          git -C common status --short
-
+          echo "SUSFS patches applied cleanly."
       - name: Generate BG7n KSU + SUSFS defconfig
         shell: bash
         working-directory: gki/common
@@ -541,8 +528,8 @@ jobs:
           GOOGLE_GKI_VERSION=${GKI_VERSION}
           GOOGLE_GKI_SHA=${GKI_SHA}
           COMMON_COMMIT=${COMMON_COMMIT}
-          KERNELSU_TAG=${KSU_TAG}
-          KSU_PATCH_MODE=git-3way
+          KERNELSU_REPO=${KSU_REPO}
+          KERNELSU_COMMIT=${KSU_COMMIT}
           KERNELSU_COMMIT=${KSU_COMMIT}
           SUSFS_REF=${{ inputs.susfs_ref }}
           SUSFS_COMMIT=${SUSFS_COMMIT}
@@ -588,7 +575,7 @@ jobs:
             Commit ${GKI_SHA}
 
           KernelSU:
-            ${KSU_TAG}
+            exact commit ${KSU_COMMIT}
 
           SUSFS:
             pinned commit ${{ inputs.susfs_ref }}
