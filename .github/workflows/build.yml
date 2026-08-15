@@ -58,18 +58,30 @@ jobs:
         run: |
           set -euxo pipefail
 
+          # NDK 25.2.9519653 == Android NDK r25b.
+          # Download the NDK archive directly so this job does not depend on
+          # Java/sdkmanager compatibility.
           NDK_VERSION="25.2.9519653"
+          NDK_ARCHIVE="android-ndk-r25b-linux.zip"
           SDK_ROOT="${RUNNER_TEMP}/android-sdk"
           NDK_ROOT="${SDK_ROOT}/ndk/${NDK_VERSION}"
 
-          mkdir -p "${SDK_ROOT}/cmdline-tools"
-          curl -fL             "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"             -o "${RUNNER_TEMP}/cmdline-tools.zip"
+          rm -rf "${SDK_ROOT}"
+          mkdir -p "${SDK_ROOT}"
 
-          unzip -q "${RUNNER_TEMP}/cmdline-tools.zip" -d "${SDK_ROOT}/cmdline-tools"
-          mv "${SDK_ROOT}/cmdline-tools/cmdline-tools" "${SDK_ROOT}/cmdline-tools/latest"
+          curl -fL \
+            "https://dl.google.com/android/repository/${NDK_ARCHIVE}" \
+            -o "${RUNNER_TEMP}/${NDK_ARCHIVE}"
 
-          yes | "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "ndk;${NDK_VERSION}"
+          unzip -q \
+            "${RUNNER_TEMP}/${NDK_ARCHIVE}" \
+            -d "${RUNNER_TEMP}/android-ndk"
+
+          mkdir -p "${SDK_ROOT}/ndk"
+          test -d "${RUNNER_TEMP}/android-ndk/android-ndk-r25b"
+          mv \
+            "${RUNNER_TEMP}/android-ndk/android-ndk-r25b" \
+            "${NDK_ROOT}"
 
           test -x "${NDK_ROOT}/ndk-build"
 
@@ -78,7 +90,9 @@ jobs:
           echo "ANDROID_NDK_HOME=${NDK_ROOT}" >> "${GITHUB_ENV}"
           echo "${NDK_ROOT}" >> "${GITHUB_PATH}"
 
-          ndk-build --version
+          echo "=== Android NDK ==="
+          echo "ANDROID_NDK_HOME=${NDK_ROOT}"
+          "${NDK_ROOT}/ndk-build" --version
 
       - name: Fetch exact stock BG7n boot.img from Release
         shell: bash
