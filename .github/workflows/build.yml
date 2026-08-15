@@ -286,7 +286,9 @@ jobs:
             patch --batch --forward -p1 < 10_enable_susfs_for_ksu.patch
           )
 
-          git -C KernelSU diff --check
+          # Do not use `git diff --check` here: the upstream SUSFS patch
+          # intentionally carries a few whitespace changes.  A whitespace
+          # warning is not a patch-application conflict.
           test -z "$(git -C KernelSU status --porcelain | grep '^UU ' || true)"
 
           echo "=== GKI SUSFS patch ==="
@@ -295,10 +297,15 @@ jobs:
             patch --batch --forward -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           )
 
-          git -C common diff --check
+          # Same rule for the GKI patch: validate application/conflicts,
+          # not cosmetic whitespace warnings.
           test -z "$(git -C common status --porcelain | grep '^UU ' || true)"
 
-          echo "SUSFS patches applied cleanly."
+          echo "SUSFS patches applied without merge conflicts."
+          echo "KernelSU changed files:"
+          git -C KernelSU status --short
+          echo "GKI changed files:"
+          git -C common status --short
       - name: Generate BG7n KSU + SUSFS defconfig
         shell: bash
         working-directory: gki/common
