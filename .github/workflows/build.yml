@@ -1,6 +1,6 @@
-name: Build BG7n GKI r3 + KernelSU + SUSFS
+name: "Build BG7n GKI r3 + KernelSU + SUSFS"
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       susfs_ref:
@@ -392,30 +392,20 @@ jobs:
           mkdir -p work/boot artifact/boot
           cp stock/boot.img work/boot/boot.img
 
+          MAGISK_API="https://api.github.com/repos/topjohnwu/Magisk/releases/latest"
           MAGISK_URL="$(
-            python3 - <<'PY'
-import json
-import urllib.request
-
-url = "https://api.github.com/repos/topjohnwu/Magisk/releases/latest"
-req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
-
-with urllib.request.urlopen(req) as r:
-    data = json.load(r)
-
-assets = [
-    a["browser_download_url"]
-    for a in data["assets"]
-    if a["name"].endswith(".apk") and a["name"].startswith("Magisk-")
-]
-
-if not assets:
-    raise SystemExit("Magisk APK not found")
-
-print(assets[0])
-PY
+            curl -fsSL               -H "Accept: application/vnd.github+json"               "${MAGISK_API}" |
+            jq -r '
+              .assets[]
+              | select(.name | startswith("Magisk-"))
+              | select(.name | endswith(".apk"))
+              | .browser_download_url
+            ' |
+            head -n1
           )"
 
+          test -n "${MAGISK_URL}"
+          echo "Magisk URL: ${MAGISK_URL}"
           curl -fL "${MAGISK_URL}" -o magisk.apk
 
           unzip -j -o magisk.apk             'lib/arm64-v8a/libmagiskboot.so'             -d work
