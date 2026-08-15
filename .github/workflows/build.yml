@@ -107,21 +107,41 @@ jobs:
 
           gh release view "${BOOT_RELEASE_TAG}"             --repo "${BOOT_REPO}"             --json tagName,name,assets             --jq '.tagName + " | " + .name + " | assets=" + ((.assets|length)|tostring)'
 
-          gh release download "${BOOT_RELEASE_TAG}"             --repo "${BOOT_REPO}"             --pattern 'boot.img.zip'             --dir stock-release
+          # Do not assume the uploaded asset filename. GitHub reports the release
+          # currently has assets, and the asset name may differ from boot.img.zip.
+          # Download every release asset, then select the ZIP that actually contains
+          # exactly one boot.img.
+          gh release download "${BOOT_RELEASE_TAG}"             --repo "${BOOT_REPO}"             --dir stock-release
 
-          BOOT_ASSET="stock-release/boot.img.zip"
-          test -s "${BOOT_ASSET}"
+          echo "=== Downloaded release assets ==="
+          find stock-release -maxdepth 1 -type f -printf '%f\n' | sort
 
+          CANDIDATES=()
+          while IFS= read -r -d '' z; do
+            mapfile -t ENTRIES < <(
+              unzip -Z1 "$z" 2>/dev/null |
+              awk 'tolower($0) ~ /(^|\/)boot\.img$/ {print}'
+            )
+            if [ "${#ENTRIES[@]}" -eq 1 ]; then
+              CANDIDATES+=("$z")
+              echo "Boot candidate: $z -> ${ENTRIES[0]}"
+            fi
+          done < <(find stock-release -maxdepth 1 -type f -iname '*.zip' -print0)
+
+          test "${#CANDIDATES[@]}" -eq 1 || {
+            echo "::error::Expected exactly one release ZIP containing exactly one boot.img."
+            echo "Candidates found: ${#CANDIDATES[@]}"
+            printf '%s\n' "${CANDIDATES[@]:-<none>}"
+            echo "Release asset names:"
+            find stock-release -maxdepth 1 -type f -printf '%f\n' | sort
+            exit 1
+          }
+
+          BOOT_ASSET="${CANDIDATES[0]}"
           mapfile -t BOOT_ENTRIES < <(
             unzip -Z1 "${BOOT_ASSET}" |
             awk 'tolower($0) ~ /(^|\/)boot\.img$/ {print}'
           )
-
-          test "${#BOOT_ENTRIES[@]}" -eq 1 || {
-            echo "::error::Expected exactly one boot.img inside boot.img.zip"
-            printf '%s\n' "${BOOT_ENTRIES[@]:-<none>}"
-            exit 1
-          }
 
           unzip -p "${BOOT_ASSET}" "${BOOT_ENTRIES[0]}" > stock/boot.img
           test -s stock/boot.img
