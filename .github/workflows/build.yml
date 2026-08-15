@@ -26,22 +26,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # ==============================================================
-  # DEVICE
-  # ==============================================================
-
   DEVICE: BG7n
   ARCH: arm64
 
   # ==============================================================
   # GOOGLE GKI
-  #
-  # Android 12 / Linux 5.10
-  # Google release:
-  # android12-5.10-2025-06_r3
-  # Linux 5.10.237
   # ==============================================================
-  
+
   GKI_MANIFEST_BRANCH: common-android12-5.10-2025-06
   GKI_COMMON_TAG: android12-5.10-2025-06_r3
   GKI_VERSION: "5.10.237"
@@ -49,11 +40,6 @@ env:
 
   # ==============================================================
   # OFFICIAL KERNELSU
-  #
-  # This is the official KernelSU repository.
-  #
-  # The SUSFS v2.2.0 patch is synchronized with this KernelSU
-  # development point.
   # ==============================================================
 
   KSU_REPO: https://github.com/tiann/KernelSU.git
@@ -66,13 +52,12 @@ env:
   SUSFS_REPO: https://gitlab.com/simonpunk/susfs4ksu.git
 
   # ==============================================================
-  # STOCK BOOT
+  # STOCK DEVICE BOOT
   # ==============================================================
 
   BOOT_REPO: whmyjda97-lab/tecno20c
 
 jobs:
-
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
@@ -80,7 +65,7 @@ jobs:
     steps:
 
       # ============================================================
-      # 01 - CHECKOUT BUILD KIT
+      # 01 - CHECKOUT
       # ============================================================
 
       - name: 01 - Checkout build kit
@@ -133,9 +118,7 @@ jobs:
             zip \
             android-sdk-libsparse-utils
 
-          echo "=========================================="
-          echo "HOST TOOLCHAIN"
-          echo "=========================================="
+          echo "=== HOST TOOLCHAIN ==="
 
           clang --version
           ld.lld --version
@@ -189,13 +172,12 @@ jobs:
           echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_HOME=${NDK_ROOT}" >> "${GITHUB_ENV}"
-
           echo "${NDK_ROOT}" >> "${GITHUB_PATH}"
 
           "${NDK_ROOT}/ndk-build" --version
 
       # ============================================================
-      # 04 - STOCK BOOT
+      # 04 - FETCH STOCK BOOT
       # ============================================================
 
       - name: 04 - Fetch exact stock BG7n boot
@@ -206,12 +188,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          rm -rf stock-release stock
-          mkdir -p stock-release stock
+          rm -rf \
+            stock-release \
+            stock
 
-          echo "=========================================="
-          echo "STOCK BOOT RELEASE"
-          echo "=========================================="
+          mkdir -p \
+            stock-release \
+            stock
 
           gh release view \
             "${BOOT_RELEASE_TAG}" \
@@ -237,7 +220,7 @@ jobs:
             if [ "${#ENTRIES[@]}" -eq 1 ]; then
               CANDIDATES+=("$z")
 
-              echo "Boot candidate:"
+              echo "BOOT CANDIDATE:"
               echo "  ZIP:    $z"
               echo "  MEMBER: ${ENTRIES[0]}"
             fi
@@ -251,12 +234,10 @@ jobs:
           )
 
           if [ "${#CANDIDATES[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one ZIP containing exactly one boot.img."
-            echo "Found: ${#CANDIDATES[@]}"
-
+            echo "::error::Expected exactly one release ZIP containing exactly one boot.img."
+            echo "Candidates: ${#CANDIDATES[@]}"
             printf '%s\n' \
               "${CANDIDATES[@]:-<none>}"
-
             exit 1
           fi
 
@@ -274,13 +255,11 @@ jobs:
 
           test -s stock/boot.img
 
-          echo
-          echo "Stock boot:"
           file stock/boot.img
 
-          echo
-          echo "Stock boot SHA256:"
-          sha256sum stock/boot.img | tee stock/boot.sha256
+          sha256sum \
+            stock/boot.img |
+            tee stock/boot.sha256
 
       # ============================================================
       # 05 - STOCK DEFCONFIG
@@ -293,20 +272,18 @@ jobs:
 
           test -s BG7n_stock_defconfig
 
-          echo "=========================================="
-          echo "STOCK DEFCONFIG SHA256"
-          echo "=========================================="
+          echo "=== BG7n stock defconfig SHA256 ==="
 
-          sha256sum BG7n_stock_defconfig
+          sha256sum \
+            BG7n_stock_defconfig
 
           echo
-          echo "=========================================="
-          echo "STOCK CONFIG FACTS"
-          echo "=========================================="
+          echo "=== Stock configuration facts ==="
 
           grep -E \
             '^CONFIG_(ARM64_4K_PAGES|ARM64_16K_PAGES|ARM64_64K_PAGES|ARM64_VA_BITS_[0-9]+|ARM64_PA_BITS_[0-9]+|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|CFI_CLANG_SHADOW|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|OVERLAY_FS)=' \
-            BG7n_stock_defconfig || true
+            BG7n_stock_defconfig \
+            || true
 
       # ============================================================
       # 06 - REPO TOOL
@@ -334,7 +311,7 @@ jobs:
       # 07 - GOOGLE GKI SOURCE
       # ============================================================
 
-      - name: 07 - Sync Google GKI r3 source
+      - name: 07 - Sync exact Google GKI r3 source
         shell: bash
         run: |
           set -euxo pipefail
@@ -359,10 +336,6 @@ jobs:
           test -d common
           test -f common/Makefile
 
-          echo "=========================================="
-          echo "FETCH EXACT COMMON TAG"
-          echo "=========================================="
-
           git -C common fetch \
             --no-tags \
             https://android.googlesource.com/kernel/common.git \
@@ -372,25 +345,27 @@ jobs:
             --detach \
             "refs/tags/${GKI_COMMON_TAG}"
 
-          COMMON_COMMIT="$(git -C common rev-parse HEAD)"
+          COMMON_COMMIT="$(
+            git -C common rev-parse HEAD
+          )"
 
-          echo "Expected:"
+          echo "EXPECTED:"
           echo "${GKI_SHA}"
 
           echo
-          echo "Actual:"
+          echo "ACTUAL:"
           echo "${COMMON_COMMIT}"
 
-          test "${COMMON_COMMIT}" = "${GKI_SHA}"
-
-          echo
-          echo "Kernel version:"
+          test \
+            "${COMMON_COMMIT}" = \
+            "${GKI_SHA}"
 
           test \
             "$(make -s -C common kernelversion)" = \
             "${GKI_VERSION}"
 
-          repo manifest -r > manifest.lock.xml
+          repo manifest -r > \
+            manifest.lock.xml
 
           cat > ../gki_identity.txt <<EOF
           GKI_MANIFEST_BRANCH=${GKI_MANIFEST_BRANCH}
@@ -401,10 +376,10 @@ jobs:
           EOF
 
       # ============================================================
-      # 08 - GOOGLE LLVM
+      # 08 - GOOGLE TOOLCHAIN
       # ============================================================
 
-      - name: 08 - Select Google LLVM toolchain
+      - name: 08 - Select exact Google GKI LLVM
         shell: bash
         working-directory: gki
         run: |
@@ -423,10 +398,17 @@ jobs:
 
           GKI_CLANG_BIN="${PWD}/${CLANG_PREBUILT_BIN}"
 
-          test -x "${GKI_CLANG_BIN}/clang"
-          test -x "${GKI_CLANG_BIN}/ld.lld"
-          test -x "${GKI_CLANG_BIN}/llvm-ar"
-          test -x "${GKI_CLANG_BIN}/llvm-nm"
+          test -x \
+            "${GKI_CLANG_BIN}/clang"
+
+          test -x \
+            "${GKI_CLANG_BIN}/ld.lld"
+
+          test -x \
+            "${GKI_CLANG_BIN}/llvm-ar"
+
+          test -x \
+            "${GKI_CLANG_BIN}/llvm-nm"
 
           echo "GKI_CLANG_BIN=${GKI_CLANG_BIN}" \
             >> "${GITHUB_ENV}"
@@ -440,20 +422,16 @@ jobs:
           echo "${GKI_CLANG_BIN}" \
             >> "${GITHUB_PATH}"
 
-          echo "=========================================="
-          echo "GOOGLE CLANG"
-          echo "=========================================="
-
           "${GKI_CLANG_BIN}/clang" --version
           "${GKI_CLANG_BIN}/ld.lld" --version
           "${GKI_CLANG_BIN}/llvm-ar" --version
           "${GKI_CLANG_BIN}/llvm-nm" --version
 
       # ============================================================
-      # 09 - KERNELSU
+      # 09 - OFFICIAL KERNELSU
       # ============================================================
 
-      - name: 09 - Clone official KernelSU
+      - name: 09 - Clone exact KernelSU commit
         shell: bash
         working-directory: gki
         run: |
@@ -484,12 +462,13 @@ jobs:
             "${ACTUAL_KSU_COMMIT}" = \
             "${KSU_COMMIT}"
 
-          test -f KernelSU/kernel/Kconfig
-          test -f KernelSU/kernel/Kbuild
+          test -f \
+            KernelSU/kernel/Kconfig
 
-          echo "=========================================="
-          echo "KERNELSU"
-          echo "=========================================="
+          test -f \
+            KernelSU/kernel/Kbuild
+
+          echo "=== KernelSU ==="
 
           git -C KernelSU log \
             -1 \
@@ -505,7 +484,7 @@ jobs:
       # 10 - SUSFS
       # ============================================================
 
-      - name: 10 - Clone and verify SUSFS
+      - name: 10 - Clone and verify pinned SUSFS
         shell: bash
         working-directory: gki
         env:
@@ -553,21 +532,6 @@ jobs:
           test -f \
             susfs/ksu_module_susfs/module.prop
 
-          echo "=========================================="
-          echo "SUSFS IDENTITY"
-          echo "=========================================="
-
-          git -C susfs log \
-            -1 \
-            --oneline \
-            --decorate
-
-          echo
-          echo "module.prop:"
-
-          cat \
-            susfs/ksu_module_susfs/module.prop
-
           grep -Eq \
             '^version=v?2\.2\.0($|[.-])' \
             susfs/ksu_module_susfs/module.prop
@@ -581,15 +545,11 @@ jobs:
       # 11 - APPLY SUSFS
       # ============================================================
 
-      - name: 11 - Apply official SUSFS patches
+      - name: 11 - Apply SUSFS kernel patches
         shell: bash
         working-directory: gki
         run: |
           set -euxo pipefail
-
-          echo "=========================================="
-          echo "COPY SUSFS PATCH FILES"
-          echo "=========================================="
 
           cp \
             susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch \
@@ -607,10 +567,6 @@ jobs:
             susfs/kernel_patches/include/linux/. \
             common/include/linux/
 
-          echo "=========================================="
-          echo "PATCH KERNELSU"
-          echo "=========================================="
-
           (
             cd KernelSU
 
@@ -620,10 +576,6 @@ jobs:
               -p1 \
               < 10_enable_susfs_for_ksu.patch
           )
-
-          echo "=========================================="
-          echo "PATCH GKI"
-          echo "=========================================="
 
           (
             cd common
@@ -635,26 +587,28 @@ jobs:
               < 50_add_susfs_in_gki-android12-5.10.patch
           )
 
-          echo
-          echo "KernelSU changes:"
+          echo "=== KernelSU changes ==="
           git -C KernelSU status --short
 
           echo
-          echo "GKI changes:"
+          echo "=== GKI changes ==="
           git -C common status --short
 
       # ============================================================
       # 12 - KERNELSU INTEGRATION
       # ============================================================
 
-      - name: 12 - Integrate KernelSU into drivers
+      - name: 12 - Integrate KernelSU
         shell: bash
         working-directory: gki
         run: |
           set -euxo pipefail
 
-          test -f KernelSU/kernel/Kconfig
-          test -f KernelSU/kernel/Kbuild
+          test -f \
+            KernelSU/kernel/Kconfig
+
+          test -f \
+            KernelSU/kernel/Kbuild
 
           rm -rf \
             common/drivers/kernelsu
@@ -696,9 +650,7 @@ jobs:
           from pathlib import Path
 
           p = Path("common/drivers/Kconfig")
-
           text = p.read_text()
-
           source = 'source "drivers/kernelsu/Kconfig"\n'
 
           if source not in text:
@@ -718,6 +670,7 @@ jobs:
 
               p.write_text(text)
           PY
+
           fi
 
           grep -qF \
@@ -736,11 +689,10 @@ jobs:
             '^config[[:space:]]\+KSU_SUSFS\([[:space:]]\|$\)' \
             common/drivers/kernelsu
 
-          echo
           echo "KernelSU integration PASSED."
 
       # ============================================================
-      # 13 - CLEAN GENERATED CONFIG
+      # 13 - CLEAN GENERATED FILES
       # ============================================================
 
       - name: 13 - Clean generated configuration
@@ -762,18 +714,7 @@ jobs:
           test ! -f defconfig
 
       # ============================================================
-      # 14 - CREATE DEVICE DEFCONFIG
-      #
-      # IMPORTANT:
-      #
-      # We DO NOT inherit build.config.gki.aarch64.
-      #
-      # That file enables Google's ABI/KMI certification machinery.
-      # This custom kernel is not a certified GKI binary because
-      # KernelSU/SUSFS modify the kernel.
-      #
-      # This directly avoids the abi.whitelist failure from the
-      # previous workflow.
+      # 14 - GENERATE DEFCONFIG
       # ============================================================
 
       - name: 14 - Generate BG7n KernelSU SUSFS defconfig
@@ -783,21 +724,24 @@ jobs:
           set -euxo pipefail
 
           STOCK_CONFIG="${GITHUB_WORKSPACE}/BG7n_stock_defconfig"
-
           GKI_BASE_CONFIG="${PWD}/arch/arm64/configs/gki_defconfig"
-
           CONFIG_OUT="${RUNNER_TEMP}/bg7n-kconfig"
 
-          test -s "${STOCK_CONFIG}"
-          test -s "${GKI_BASE_CONFIG}"
+          test -s \
+            "${STOCK_CONFIG}"
 
-          rm -rf "${CONFIG_OUT}"
+          test -s \
+            "${GKI_BASE_CONFIG}"
 
-          mkdir -p "${CONFIG_OUT}"
+          rm -rf \
+            "${CONFIG_OUT}"
 
-          # --------------------------------------------------------
-          # Protected GKI symbols.
-          # --------------------------------------------------------
+          mkdir -p \
+            "${CONFIG_OUT}"
+
+          # ----------------------------------------------------------
+          # Protected symbols.
+          # ----------------------------------------------------------
 
           cat > \
             "${CONFIG_OUT}/protected.symbols" <<'EOF'
@@ -824,9 +768,9 @@ jobs:
           CONFIG_FTRACE_MCOUNT_USE_RECORDMCOUNT
           EOF
 
-          # --------------------------------------------------------
-          # Filter vendor config.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Filter stock fragment.
+          # ----------------------------------------------------------
 
           python3 - \
             "${CONFIG_OUT}/protected.symbols" \
@@ -886,9 +830,9 @@ jobs:
           )
           PY
 
-          # --------------------------------------------------------
-          # Merge using Linux's official merge_config.sh.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Merge official GKI base + device fragment.
+          # ----------------------------------------------------------
 
           cp \
             "${GKI_BASE_CONFIG}" \
@@ -904,18 +848,18 @@ jobs:
           test -s \
             "${CONFIG_OUT}/.config"
 
-          # --------------------------------------------------------
-          # Enable KernelSU + SUSFS.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Enable KernelSU/SUSFS.
+          # ----------------------------------------------------------
 
           ./scripts/config \
             --file "${CONFIG_OUT}/.config" \
             -e KSU \
             -e KSU_SUSFS
 
-          # --------------------------------------------------------
-          # Resolve Kconfig.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Resolve with exact Google LLVM.
+          # ----------------------------------------------------------
 
           make \
             LLVM=1 \
@@ -926,21 +870,17 @@ jobs:
             O="${CONFIG_OUT}" \
             olddefconfig
 
-          test -s \
-            "${CONFIG_OUT}/.config"
-
           echo
-          echo "=========================================="
-          echo "RESOLVED CONFIG"
-          echo "=========================================="
+          echo "=== RESOLVED CONFIG ==="
 
           grep -E \
-            '^CONFIG_(CC_IS_CLANG|LD_IS_LLD|AS_IS_LLVM|KSU|KSU_SUSFS|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|KPROBES|EXT4_FS|THREAD_INFO_IN_TASK|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|OVERLAY_FS)=' \
-            "${CONFIG_OUT}/.config" || true
+            '^CONFIG_(CC_IS_CLANG|LD_IS_LLD|AS_IS_LLVM|KSU|KSU_SUSFS|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|OVERLAY_FS)=' \
+            "${CONFIG_OUT}/.config" \
+            || true
 
-          # --------------------------------------------------------
-          # Mandatory checks.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Hard required KSU/SUSFS configuration.
+          # ----------------------------------------------------------
 
           for sym in \
             CONFIG_KSU \
@@ -962,9 +902,9 @@ jobs:
 
           done
 
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
           # Generate canonical minimal defconfig.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
 
           make \
             LLVM=1 \
@@ -982,17 +922,9 @@ jobs:
           test -s \
             arch/arm64/configs/bg7n_defconfig
 
-          echo
-          echo "=========================================="
-          echo "CANONICAL DEFCONFIG"
-          echo "=========================================="
-
-          sha256sum \
-            arch/arm64/configs/bg7n_defconfig
-
-          # --------------------------------------------------------
-          # Re-expand canonical defconfig.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Re-expand and prove that KSU/SUSFS survive.
+          # ----------------------------------------------------------
 
           rm -f \
             "${CONFIG_OUT}/.config"
@@ -1008,15 +940,6 @@ jobs:
 
           cp \
             "${CONFIG_OUT}/.config" \
-            "${CONFIG_OUT}/expanded.config"
-
-          echo
-          echo "=========================================="
-          echo "EXPANDED CANONICAL CONFIG"
-          echo "=========================================="
-
-          grep -E \
-            '^CONFIG_(KSU|KSU_SUSFS|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK)=' \
             "${CONFIG_OUT}/expanded.config"
 
           for sym in \
@@ -1039,9 +962,9 @@ jobs:
 
           done
 
-          # --------------------------------------------------------
-          # Stability test.
-          # --------------------------------------------------------
+          # ----------------------------------------------------------
+          # Canonical stability.
+          # ----------------------------------------------------------
 
           make \
             LLVM=1 \
@@ -1060,12 +983,12 @@ jobs:
 
             diff -u \
               arch/arm64/configs/bg7n_defconfig \
-              "${CONFIG_OUT}/defconfig" || true
+              "${CONFIG_OUT}/defconfig" \
+              || true
 
             exit 1
           }
 
-          echo
           echo "DEFCONFIG GENERATION PASSED."
 
       # ============================================================
@@ -1091,16 +1014,13 @@ jobs:
       # ============================================================
       # 16 - CUSTOM BUILD CONFIG
       #
-      # CRITICAL:
+      # IMPORTANT:
       #
-      # Do NOT source build.config.gki.aarch64.
+      # Source Google's normal Android 12 configs, but do NOT retain
+      # GKI aarch64 ABI/KMI variables.
       #
-      # We intentionally use:
-      #   build.config.common
-      #   build.config.aarch64
-      #   build.config.gki
-      #
-      # and then disable all KMI/ABI certification variables.
+      # build.sh only enters those paths when the effective variables
+      # have non-empty values.
       # ============================================================
 
       - name: 16 - Create custom BG7n build.config
@@ -1109,40 +1029,44 @@ jobs:
         run: |
           set -euxo pipefail
 
-          cat > build.config.bg7n.ksu.susfs <<'EOF'
+          cat > \
+            build.config.bg7n.ksu.susfs <<'EOF'
           . ${ROOT_DIR}/${KERNEL_DIR}/build.config.common
           . ${ROOT_DIR}/${KERNEL_DIR}/build.config.aarch64
           . ${ROOT_DIR}/${KERNEL_DIR}/build.config.gki
 
           # --------------------------------------------------------
-          # Device defconfig
+          # Our canonical device defconfig.
           # --------------------------------------------------------
 
           DEFCONFIG=bg7n_defconfig
 
+          # Keep Google's defconfig validation.
           POST_DEFCONFIG_CMDS="check_defconfig"
 
           # --------------------------------------------------------
-          # Custom kernel:
-          # do NOT run Google GKI ABI/KMI certification.
+          # IMPORTANT:
+          #
+          # This is a custom KernelSU/SUSFS kernel.
+          #
+          # Do not carry Google's GKI ABI/KMI certification settings.
           # --------------------------------------------------------
-
-          TRIM_NONLISTED_KMI=
-          KMI_SYMBOL_LIST=
-          ADDITIONAL_KMI_SYMBOL_LISTS=
-          KMI_SYMBOL_LIST_ADD_ONLY=
-          KMI_SYMBOL_LIST_STRICT_MODE=
-          KMI_ENFORCED=0
 
           unset ABI_DEFINITION
+          unset TIDY_ABI
+
           unset KMI_SYMBOL_LIST
           unset ADDITIONAL_KMI_SYMBOL_LISTS
+          unset KMI_SYMBOL_LIST_ADD_ONLY
+          unset KMI_SYMBOL_LIST_STRICT_MODE
 
-          BUILD_GKI_CERTIFICATION_TOOLS=0
-          BUILD_GKI_ARTIFACTS=0
+          unset TRIM_NONLISTED_KMI
+          unset KMI_ENFORCED
+
+          unset MODULES_ORDER
 
           # --------------------------------------------------------
-          # Build outputs
+          # Outputs.
           # --------------------------------------------------------
 
           MAKE_GOALS="
@@ -1157,42 +1081,122 @@ jobs:
           "
           EOF
 
-          echo "=========================================="
-          echo "CUSTOM BUILD CONFIG"
-          echo "=========================================="
-
-          cat build.config.bg7n.ksu.susfs
-
-          # --------------------------------------------------------
-          # Absolute guard against the previous ABI problem.
-          # --------------------------------------------------------
-
-          if grep -Eq \
-            '^[[:space:]]*(ABI_DEFINITION|KMI_SYMBOL_LIST|ADDITIONAL_KMI_SYMBOL_LISTS|BUILD_GKI_CERTIFICATION_TOOLS)=' \
+          echo "=== build.config.bg7n.ksu.susfs ==="
+          cat \
             build.config.bg7n.ksu.susfs
-          then
-
-            echo "::error::Unexpected ABI/KMI certification variable."
-            exit 1
-
-          fi
 
       # ============================================================
-      # 17 - FINAL SOURCE TREE CHECK
+      # 17 - EFFECTIVE BUILD CONFIG VALIDATION
+      #
+      # THIS replaces the broken textual grep which caused the current
+      # screenshot error.
+      #
+      # We source the config exactly as build.sh does and examine the
+      # effective shell values.
       # ============================================================
 
-      - name: 17 - Final source tree check
+      - name: 17 - Verify effective ABI/KMI configuration
+        shell: bash
+        working-directory: gki
+        run: |
+          set -euxo pipefail
+
+          echo "=== Loading build config exactly as build.sh ==="
+
+          (
+            export ROOT_DIR="${PWD}"
+            export KERNEL_DIR="common"
+
+            source \
+              common/build.config.bg7n.ksu.susfs
+
+            echo
+            echo "=== EFFECTIVE ABI/KMI VARIABLES ==="
+
+            printf 'ABI_DEFINITION=<%s>\n' \
+              "${ABI_DEFINITION:-}"
+
+            printf 'TIDY_ABI=<%s>\n' \
+              "${TIDY_ABI:-}"
+
+            printf 'KMI_SYMBOL_LIST=<%s>\n' \
+              "${KMI_SYMBOL_LIST:-}"
+
+            printf 'ADDITIONAL_KMI_SYMBOL_LISTS=<%s>\n' \
+              "${ADDITIONAL_KMI_SYMBOL_LISTS:-}"
+
+            printf 'KMI_SYMBOL_LIST_ADD_ONLY=<%s>\n' \
+              "${KMI_SYMBOL_LIST_ADD_ONLY:-}"
+
+            printf 'KMI_SYMBOL_LIST_STRICT_MODE=<%s>\n' \
+              "${KMI_SYMBOL_LIST_STRICT_MODE:-}"
+
+            printf 'TRIM_NONLISTED_KMI=<%s>\n' \
+              "${TRIM_NONLISTED_KMI:-}"
+
+            printf 'KMI_ENFORCED=<%s>\n' \
+              "${KMI_ENFORCED:-}"
+
+            printf 'MODULES_ORDER=<%s>\n' \
+              "${MODULES_ORDER:-}"
+
+            echo
+
+            test -z \
+              "${ABI_DEFINITION:-}"
+
+            test -z \
+              "${TIDY_ABI:-}"
+
+            test -z \
+              "${KMI_SYMBOL_LIST:-}"
+
+            test -z \
+              "${ADDITIONAL_KMI_SYMBOL_LISTS:-}"
+
+            test -z \
+              "${KMI_SYMBOL_LIST_ADD_ONLY:-}"
+
+            test -z \
+              "${KMI_SYMBOL_LIST_STRICT_MODE:-}"
+
+            test -z \
+              "${TRIM_NONLISTED_KMI:-}"
+
+            test -z \
+              "${KMI_ENFORCED:-}"
+
+            test -z \
+              "${MODULES_ORDER:-}"
+
+            echo
+            echo "=== ABI/KMI runtime configuration is CLEAN ==="
+          )
+
+      # ============================================================
+      # 18 - FINAL SOURCE TREE CHECK
+      # ============================================================
+
+      - name: 18 - Verify final source tree
         shell: bash
         working-directory: gki/common
         run: |
           set -euxo pipefail
 
-          test ! -f .config
-          test ! -f defconfig
+          test ! -f \
+            .config
 
-          test ! -d include/config
-          test ! -d include/generated
-          test ! -d arch/arm64/include/generated
+          test ! -f \
+            defconfig
+
+          test ! -d \
+            include/config
+
+          test ! -d \
+            include/generated
+
+          test ! -d \
+            arch/arm64/include/generated
 
           test -L \
             drivers/kernelsu
@@ -1214,19 +1218,13 @@ jobs:
           test -s \
             arch/arm64/configs/bg7n_defconfig
 
-          echo
-          echo "=========================================="
-          echo "NO STALE CONFIG"
-          echo "NO STALE GENERATED HEADERS"
-          echo "KSU LINK OK"
-          echo "DEFCONFIG OK"
-          echo "=========================================="
+          echo "SOURCE TREE READY."
 
       # ============================================================
-      # 18 - BUILD
+      # 19 - BUILD KERNEL
       # ============================================================
 
-      - name: 18 - Build BG7n kernel
+      - name: 19 - Build BG7n kernel
         shell: bash
         working-directory: gki
         env:
@@ -1249,22 +1247,13 @@ jobs:
           export MAKEFLAGS="-j${MAKE_JOBS}"
 
           rm -rf \
-            out/android12-5.10-2025-06
+            out/android12-5.10
 
           test ! -f \
             common/.config
 
           test ! -f \
             common/defconfig
-
-          echo
-          echo "=========================================="
-          echo "BUILD SETTINGS"
-          echo "=========================================="
-
-          grep -E \
-            '^(DEFCONFIG|TRIM_NONLISTED_KMI|KMI_SYMBOL_LIST|KMI_SYMBOL_LIST_STRICT_MODE|KMI_ENFORCED|BUILD_GKI_CERTIFICATION_TOOLS|BUILD_GKI_ARTIFACTS)=' \
-            common/build.config.bg7n.ksu.susfs || true
 
           echo
           echo "=========================================="
@@ -1275,10 +1264,10 @@ jobs:
             ./build/build.sh
 
       # ============================================================
-      # 19 - VERIFY BUILD OUTPUT
+      # 20 - VERIFY KERNEL
       # ============================================================
 
-      - name: 19 - Verify kernel output
+      - name: 20 - Verify kernel output
         shell: bash
         working-directory: gki
         run: |
@@ -1292,14 +1281,16 @@ jobs:
             find out \
               -type f \
               -path '*/dist/Image.lz4' |
-            head -n1 || true
+            head -n1 ||
+            true
           )"
 
           IMAGE="$(
             find out \
               -type f \
               -path '*/dist/Image' |
-            head -n1 || true
+            head -n1 ||
+            true
           )"
 
           test -n \
@@ -1335,7 +1326,8 @@ jobs:
             find out \
               -type f \
               -name .config |
-            head -n1 || true
+            head -n1 ||
+            true
           )"
 
           test -n \
@@ -1349,15 +1341,14 @@ jobs:
             find out \
               -type f \
               -name Module.symvers |
-            head -n1 || true
+            head -n1 ||
+            true
           )"
 
           if [ -n "${MODULE_SYMVERS}" ]; then
-
             cp \
               "${MODULE_SYMVERS}" \
               ../artifact/kernel/Module.symvers
-
           fi
 
           find out \
@@ -1380,12 +1371,13 @@ jobs:
 
           echo
           echo "=========================================="
-          echo "FINAL BUILD CONFIG"
+          echo "FINAL KERNEL CONFIG"
           echo "=========================================="
 
           grep -E \
-            '^CONFIG_(KSU|KSU_SUSFS|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK)=' \
-            ../artifact/kernel/.config
+            '^CONFIG_(KSU|KSU_SUSFS|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK|LTO_NONE|LTO_CLANG|LTO_CLANG_FULL|LTO_CLANG_THIN|CFI_CLANG|CFI_PERMISSIVE|SHADOW_CALL_STACK|KASAN|KASAN_GENERIC|KASAN_SW_TAGS|KASAN_HW_TAGS|ARM64_TAGGED_ADDR_ABI|ARM64_MTE|ARM64_PAN|ARM64_LSE_ATOMICS|SLUB|OVERLAY_FS)=' \
+            ../artifact/kernel/.config \
+            || true
 
           for sym in \
             CONFIG_KSU \
@@ -1407,10 +1399,28 @@ jobs:
 
           done
 
+          # ABI must not have been accidentally activated.
+          DIST_DIR="$(
+            dirname \
+              "${IMAGE_LZ4}"
+          )"
+
+          if [ -f \
+            "${DIST_DIR}/abi.xml" ]
+          then
+            echo "::error::abi.xml was generated unexpectedly."
+            exit 1
+          fi
+
+          if [ -f \
+            "${DIST_DIR}/abi_symbollist" ]
+          then
+            echo "::error::abi_symbollist was generated unexpectedly."
+            exit 1
+          fi
+
           echo
-          echo "=========================================="
-          echo "KERNEL VERSION"
-          echo "=========================================="
+          echo "=== Kernel version ==="
 
           make \
             -s \
@@ -1434,17 +1444,18 @@ jobs:
             git -C susfs rev-parse HEAD
 
             echo
-            echo "=== Critical config ==="
+            echo "=== Required config ==="
             grep -E \
               '^CONFIG_(KSU|KSU_SUSFS|MODULES|MODVERSIONS|KALLSYMS|KALLSYMS_ALL|THREAD_INFO_IN_TASK)=' \
               ../artifact/kernel/.config
 
             echo
-            echo "=== Build mode ==="
-            echo "CUSTOM_GKI_KERNEL=1"
-            echo "KMI_ENFORCED=0"
-            echo "TRIM_NONLISTED_KMI=0"
-            echo "GKI_CERTIFICATION=0"
+            echo "=== Custom build mode ==="
+            echo "ABI_DEFINITION=UNSET"
+            echo "KMI_SYMBOL_LIST=UNSET"
+            echo "TRIM_NONLISTED_KMI=UNSET"
+            echo "KMI_SYMBOL_LIST_STRICT_MODE=UNSET"
+            echo "KMI_ENFORCED=UNSET"
           } | tee \
             ../artifact/reports/kernel_verification.txt
 
@@ -1458,10 +1469,10 @@ jobs:
             ../artifact/kernel/Image.lz4
 
       # ============================================================
-      # 20 - BUILD SUSFS USERSPACE TOOL
+      # 21 - BUILD SUSFS USERSPACE + MODULE
       # ============================================================
 
-      - name: 20 - Build SUSFS userspace tool and module
+      - name: 21 - Build SUSFS userspace tool and module
         shell: bash
         working-directory: gki/susfs
         env:
@@ -1475,17 +1486,7 @@ jobs:
             build_ksu_susfs_tool.sh \
             build_ksu_module.sh
 
-          echo "=========================================="
-          echo "BUILD SUSFS TOOL"
-          echo "=========================================="
-
           ./build_ksu_susfs_tool.sh
-
-          echo
-          echo "=========================================="
-          echo "BUILD SUSFS MODULE"
-          echo "=========================================="
-
           ./build_ksu_module.sh
 
           test -d \
@@ -1507,13 +1508,16 @@ jobs:
           fi
 
       # ============================================================
-      # 21 - PREPARE MAGISKBOOT
+      # 22 - MAGISKBOOT
       # ============================================================
 
-      - name: 21 - Prepare MagiskBoot
+      - name: 22 - Prepare MagiskBoot
         shell: bash
         run: |
           set -euxo pipefail
+
+          mkdir -p \
+            work
 
           MAGISK_API="https://api.github.com/repos/topjohnwu/Magisk/releases/latest"
 
@@ -1552,16 +1556,11 @@ jobs:
           test -x \
             work/magiskboot
 
-          ./work/magiskboot --help \
-            >/dev/null \
-            2>&1 \
-            || true
-
       # ============================================================
-      # 22 - REPACK STOCK BOOT
+      # 23 - REPACK STOCK BOOT
       # ============================================================
 
-      - name: 22 - Repack stock BG7n boot with custom kernel
+      - name: 23 - Repack stock BG7n boot
         shell: bash
         run: |
           set -euxo pipefail
@@ -1577,58 +1576,44 @@ jobs:
           test -s \
             artifact/kernel/Image
 
-          echo "=========================================="
-          echo "UNPACK STOCK BOOT"
-          echo "=========================================="
-
           (
             cd work/boot
 
             ../magiskboot unpack boot.img
 
-            test -f kernel
-            test -s kernel
+            test -f \
+              kernel
 
-            echo
-            echo "Stock kernel identity:"
+            test -s \
+              kernel
 
-            strings kernel |
-              grep -m1 \
+            echo "=== Stock boot kernel ==="
+
+            strings \
+              kernel |
+              grep \
+                -m1 \
                 'Linux version' \
               || true
           )
 
-          # --------------------------------------------------------
-          # Confirm that the stock boot belongs to the expected
-          # GKI generation.
-          # --------------------------------------------------------
-
-          if ! strings work/boot/kernel |
+          if ! strings \
+            work/boot/kernel |
             grep -q \
               "Linux version ${GKI_VERSION}"
           then
 
-            echo "::error::Stock boot kernel version does not match ${GKI_VERSION}."
+            echo "::error::Stock boot kernel does not match ${GKI_VERSION}."
 
-            echo
-            echo "Detected versions:"
-
-            strings work/boot/kernel |
+            strings \
+              work/boot/kernel |
               grep \
                 -m5 \
                 'Linux version' \
               || true
 
             exit 1
-
           fi
-
-          echo
-          echo "Stock boot matches Linux ${GKI_VERSION}."
-
-          # --------------------------------------------------------
-          # Replace kernel only.
-          # --------------------------------------------------------
 
           cp \
             artifact/kernel/Image \
@@ -1637,17 +1622,13 @@ jobs:
           test -s \
             work/boot/kernel
 
-          echo
-          echo "=========================================="
-          echo "REPACK"
-          echo "=========================================="
-
           (
             cd work/boot
 
             ../magiskboot repack boot.img
 
-            test -s new-boot.img
+            test -s \
+              new-boot.img
           )
 
           cp \
@@ -1661,29 +1642,32 @@ jobs:
             artifact/boot/BG7n-KSU-SUSFS-boot.img
 
           sha256sum \
-            artifact/boot/BG7n-KSU-SUSFS-boot.img \
-            | tee \
+            artifact/boot/BG7n-KSU-SUSFS-boot.img |
+            tee \
               artifact/reports/generated_boot.sha256
 
       # ============================================================
-      # 23 - FINAL BUILD MANIFEST
+      # 24 - BUILD MANIFEST
       # ============================================================
 
-      - name: 23 - Create build manifest
+      - name: 24 - Create build manifest
         shell: bash
         run: |
           set -euxo pipefail
 
           SUSFS_COMMIT="$(
-            git -C gki/susfs rev-parse HEAD
+            git -C gki/susfs \
+              rev-parse HEAD
           )"
 
           KSU_ACTUAL_COMMIT="$(
-            git -C gki/KernelSU rev-parse HEAD
+            git -C gki/KernelSU \
+              rev-parse HEAD
           )"
 
           COMMON_COMMIT="$(
-            git -C gki/common rev-parse HEAD
+            git -C gki/common \
+              rev-parse HEAD
           )"
 
           STOCK_BOOT_SHA="$(
@@ -1693,7 +1677,9 @@ jobs:
               stock/boot.sha256
           )"
 
-          cat > artifact/BUILD_INFO.txt <<EOF
+          cat > \
+            artifact/BUILD_INFO.txt \
+            <<EOF
           DEVICE=${DEVICE}
 
           GOOGLE_GKI_MANIFEST_BRANCH=${GKI_MANIFEST_BRANCH}
@@ -1715,10 +1701,13 @@ jobs:
           STOCK_BOOT_SHA256=${STOCK_BOOT_SHA}
 
           CUSTOM_GKI_KERNEL=1
-          KMI_ENFORCED=0
-          TRIM_NONLISTED_KMI=0
-          KMI_SYMBOL_LIST_STRICT_MODE=0
-          GKI_CERTIFICATION=0
+
+          ABI_DEFINITION=UNSET
+          KMI_SYMBOL_LIST=UNSET
+          ADDITIONAL_KMI_SYMBOL_LISTS=UNSET
+          TRIM_NONLISTED_KMI=UNSET
+          KMI_SYMBOL_LIST_STRICT_MODE=UNSET
+          KMI_ENFORCED=UNSET
 
           REQUIRED_CONFIG_KSU=y
           REQUIRED_CONFIG_KSU_SUSFS=y
@@ -1750,10 +1739,10 @@ jobs:
             > artifact/SHA256SUMS.txt
 
       # ============================================================
-      # 24 - PACKAGE
+      # 25 - PACKAGE
       # ============================================================
 
-      - name: 24 - Package artifacts
+      - name: 25 - Package artifacts
         shell: bash
         run: |
           set -euxo pipefail
@@ -1784,12 +1773,12 @@ jobs:
             artifact/reports \
             artifact/package/reports
 
-          if [ -d artifact/boot ]; then
-
+          if [ -d \
+            artifact/boot ]
+          then
             cp -a \
               artifact/boot \
               artifact/package/boot
-
           fi
 
           cp \
@@ -1804,22 +1793,22 @@ jobs:
             artifact/package/README.txt \
             <<EOF
           TECNO BG7n
-          ================================
+          ========================================
 
-          Google GKI:
+          GOOGLE GKI:
             ${GKI_COMMON_TAG}
             Linux ${GKI_VERSION}
             ${GKI_SHA}
 
-          KernelSU:
-            Official KernelSU
+          KERNELSU:
+            ${KSU_REPO}
             ${KSU_COMMIT}
 
           SUSFS:
-            SUSFS v2.2.0
+            ${SUSFS_REPO}
             ${SUSFS_COMMIT}
 
-          Kernel:
+          REQUIRED:
             CONFIG_KSU=y
             CONFIG_KSU_SUSFS=y
             CONFIG_MODULES=y
@@ -1829,28 +1818,27 @@ jobs:
             CONFIG_THREAD_INFO_IN_TASK=y
 
           ABI/KMI:
-            Custom KernelSU/SUSFS build
-            KMI_ENFORCED=0
-            TRIM_NONLISTED_KMI=0
-            GKI_CERTIFICATION=0
+            This is a custom KernelSU/SUSFS kernel.
 
-          Important:
-            This is NOT an unmodified Google-certified GKI image.
+            ABI_DEFINITION=UNSET
+            KMI_SYMBOL_LIST=UNSET
+            TRIM_NONLISTED_KMI=UNSET
+            KMI_SYMBOL_LIST_STRICT_MODE=UNSET
+            KMI_ENFORCED=UNSET
 
-            The kernel contains KernelSU + SUSFS modifications.
+          IMPORTANT:
+            This is not an unmodified Google-certified GKI image.
 
-            Keep the original stock boot image.
+            Keep the original stock boot.img.
 
-            Verify:
-              reports/kernel_verification.txt
-              reports/generated_boot.sha256
-              SHA256SUMS.txt
+            Verify the generated kernel and generated boot image
+            before flashing.
 
-            Flash only after confirming the stock boot belongs to
-            the same GKI generation and security patch level.
-
-          Recovery:
-            Keep the untouched stock boot.img available.
+          Reports:
+            kernel/kernel_verification.txt
+            reports/generated_boot.sha256
+            reports/stock_boot.sha256
+            SHA256SUMS.txt
           EOF
 
           (
@@ -1866,10 +1854,10 @@ jobs:
             BG7n_GKI_r3_KSU_SUSFS_artifacts.zip
 
       # ============================================================
-      # 25 - UPLOAD
+      # 26 - UPLOAD
       # ============================================================
 
-      - name: 25 - Upload complete artifacts
+      - name: 26 - Upload complete artifacts
         uses: actions/upload-artifact@v4
         with:
           name: BG7n-GKI-r3-KSU-SUSFS
