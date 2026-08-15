@@ -94,7 +94,6 @@ jobs:
           test "$(git rev-parse HEAD)" = "$KERNEL_COMMIT"
           git rev-parse HEAD > "$GITHUB_WORKSPACE/verification/kernel-commit.txt"
 
-      # ✅ المرحلة المصححة - بدون فحص الرموز قبل الدمج
       - name: Extract and Verify bundled KernelSU-Next and SUSFS
         run: |
           set -euo pipefail
@@ -147,10 +146,13 @@ jobs:
       - name: Integrate bundled KernelSU-Next without network clone
         run: |
           set -euo pipefail
-          if [ -z "$KSU_DIR" ]; then
+          if [ -z "${KSU_DIR:-}" ]; then
             echo "❌ ERROR: KSU_DIR not set"
             exit 1
           fi
           KSU_ROOT="$GITHUB_WORKSPACE/$KSU_DIR"
-          test -d "$KSU_ROOT/kernel" || \
-            { echo "❌
+          if [ ! -d "$KSU_ROOT/kernel" ]; then
+            echo "❌ Missing KernelSU kernel directory"
+            exit 1
+          fi
+          echo "✓ KernelSU integration path looks good."
